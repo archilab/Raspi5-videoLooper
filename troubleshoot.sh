@@ -60,13 +60,6 @@ check_dependencies() {
         echo "Install with: sudo apt install python3-serial"
     fi
     
-    if command_exists ntpdate; then
-        echo -e "${GREEN}✓ ntpdate is installed${NC}"
-    else
-        echo -e "${RED}✗ ntpdate is not installed${NC}"
-        echo "Install with: sudo apt install ntpdate"
-    fi
-    
     if systemctl is-active --quiet systemd-timesyncd; then
         echo -e "${GREEN}✓ systemd-timesyncd is running${NC}"
     else

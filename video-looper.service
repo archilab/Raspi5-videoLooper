@@ -5,10 +5,10 @@ Wants=graphical-session.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/video_looper
-ExecStart=/usr/bin/python3 /home/pi/video_looper/video_looper.py
+User=USER_PLACEHOLDER
+Group=USER_PLACEHOLDER
+WorkingDirectory=INSTALL_DIR_PLACEHOLDER
+ExecStart=/usr/bin/python3 INSTALL_DIR_PLACEHOLDER/video_looper.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -16,14 +16,14 @@ StandardError=journal
 
 # Environment variables
 Environment=DISPLAY=:0
-Environment=HOME=/home/pi
+Environment=HOME=HOME_PLACEHOLDER
 
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/pi/videos /var/log
+ReadWritePaths=VIDEOS_DIR_PLACEHOLDER /var/log
 
 [Install]
 WantedBy=graphical.target

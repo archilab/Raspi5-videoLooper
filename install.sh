@@ -10,8 +10,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-INSTALL_DIR="/home/pi/video_looper"
-VIDEOS_DIR="/home/pi/videos"
+INSTALL_DIR="/home/$USER/video_looper"
+VIDEOS_DIR="/home/$USER/videos"
 SERVICE_NAME="video-looper"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -19,7 +19,7 @@ echo -e "${GREEN}=== Raspberry Pi Video Looper Installation ===${NC}"
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-   echo -e "${RED}This script should not be run as root. Please run as pi user.${NC}"
+   echo -e "${RED}This script should not be run as root. Please run as $USER user.${NC}"
    exit 1
 fi
 
@@ -44,12 +44,8 @@ sudo apt install -y \
     python3-venv \
     git \
     ffmpeg \
-    ntp \
-    ntpdate \
-    systemd-timesyncd \
     python3-requests \
-    python3-serial \
-    python3-serial-tools
+    python3-serial
 
 echo -e "${GREEN}Step 3: Creating directories...${NC}"
 mkdir -p "$INSTALL_DIR"
@@ -70,11 +66,19 @@ sudo cp video-looper.service "$SERVICE_FILE"
 echo -e "${GREEN}Step 5: Setting up Python environment...${NC}"
 cd "$INSTALL_DIR"
 python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
+
+# Check if virtual environment was created successfully
+if [ -f "venv/bin/activate" ]; then
+    echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
+    # Use the virtual environment's pip directly instead of sourcing
+    ./venv/bin/pip install --upgrade pip
+else
+    echo -e "${YELLOW}⚠ Virtual environment creation failed, using system pip${NC}"
+    pip3 install --upgrade pip
+fi
 
 echo -e "${GREEN}Step 6: Configuring time synchronization...${NC}"
-# Enable systemd-timesyncd for automatic NTP sync
+# Enable systemd-timesyncd for automatic NTP sync (already included in Raspberry Pi OS)
 sudo systemctl enable systemd-timesyncd
 sudo systemctl start systemd-timesyncd
 
@@ -90,24 +94,28 @@ EOF
 # Restart timesyncd to apply new configuration
 sudo systemctl restart systemd-timesyncd
 
+echo -e "${GREEN}✓ Time synchronization configured${NC}"
+
 echo -e "${GREEN}Step 7: Configuring systemd service...${NC}"
-# Update the service file to use the correct paths
-sudo sed -i "s|/home/pi/video_looper|$INSTALL_DIR|g" "$SERVICE_FILE"
-sudo sed -i "s|/home/pi/videos|$VIDEOS_DIR|g" "$SERVICE_FILE"
+# Update the service file to use the correct paths and user
+sudo sed -i "s|USER_PLACEHOLDER|$USER|g" "$SERVICE_FILE"
+sudo sed -i "s|INSTALL_DIR_PLACEHOLDER|$INSTALL_DIR|g" "$SERVICE_FILE"
+sudo sed -i "s|HOME_PLACEHOLDER|/home/$USER|g" "$SERVICE_FILE"
+sudo sed -i "s|VIDEOS_DIR_PLACEHOLDER|$VIDEOS_DIR|g" "$SERVICE_FILE"
 
 # Reload systemd and enable the service
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 
 echo -e "${GREEN}Step 8: Setting up permissions...${NC}"
-# Ensure pi user owns the directories
-sudo chown -R pi:pi "$INSTALL_DIR"
-sudo chown -R pi:pi "$VIDEOS_DIR"
+# Ensure current user owns the directories
+sudo chown -R $USER:$USER "$INSTALL_DIR"
+sudo chown -R $USER:$USER "$VIDEOS_DIR"
 
 # Create log directory if it doesn't exist
 sudo mkdir -p /var/log
 sudo touch /var/log/video_looper.log
-sudo chown pi:pi /var/log/video_looper.log
+sudo chown $USER:$USER /var/log/video_looper.log
 
 echo -e "${GREEN}Step 9: Testing installation...${NC}"
 # Test the script
@@ -132,7 +140,55 @@ touch "$VIDEOS_DIR/2024-01-01_to_2024-01-31_0900_to_1800/example_video.mp4"
 touch "$VIDEOS_DIR/2024-02-01_to_2024-02-29_0800_to_2000/example_video.mp4"
 touch "$VIDEOS_DIR/2024-12-01_to_2024-12-31_1000_to_2200/example_video.mp4"
 
+# Create projector configuration examples
+echo "Creating projector configuration examples..."
+
+cat > "$VIDEOS_DIR/2024-01-01_to_2024-01-31_0900_to_1800/projector.txt" << 'EOF'
+# Projector configuration for January videos
+enable_projector=true
+serial_port=/dev/ttyUSB0
+baud_rate=9600
+timeout=5
+start_command=PWR ON
+stop_command=PWR OFF
+start_delay=2
+stop_delay=1
+video_start_delay=5
+wait_for_response=false
+EOF
+
+cat > "$VIDEOS_DIR/2024-02-01_to_2024-02-29_0800_to_2000/projector.txt" << 'EOF'
+# Projector configuration for February videos
+enable_projector=false
+EOF
+
+cat > "$VIDEOS_DIR/2024-12-01_to_2024-12-31_1000_to_2200/projector.txt" << 'EOF'
+# Projector configuration for December videos
+enable_projector=true
+serial_port=/dev/ttyUSB0
+baud_rate=9600
+timeout=5
+start_command=PWR ON
+stop_command=PWR OFF
+start_delay=2
+stop_delay=1
+video_start_delay=5
+wait_for_response=false
+EOF
+
 echo -e "${GREEN}=== Installation Complete! ===${NC}"
+echo ""
+echo -e "${GREEN}Example folder structure created:${NC}"
+echo "$VIDEOS_DIR/"
+echo "├── 2024-01-01_to_2024-01-31_0900_to_1800/  (January: 9AM-6PM)"
+echo "│   ├── example_video.mp4"
+echo "│   └── projector.txt  (projector enabled)"
+echo "├── 2024-02-01_to_2024-02-29_0800_to_2000/  (February: 8AM-8PM)"
+echo "│   ├── example_video.mp4"
+echo "│   └── projector.txt  (projector disabled)"
+echo "└── 2024-12-01_to_2024-12-31_1000_to_2200/  (December: 10AM-10PM)"
+echo "    ├── example_video.mp4"
+echo "    └── projector.txt  (projector enabled)"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Add your video files to the appropriate folders in $VIDEOS_DIR"

@@ -60,8 +60,15 @@ class TimeSyncManager:
             return False
     
     def sync_with_ntpdate(self):
-        """Alternative NTP sync using ntpdate"""
+        """Alternative NTP sync using ntpdate (if available)"""
         try:
+            # Check if ntpdate is available
+            import shutil
+            if not shutil.which('ntpdate'):
+                self.logger.info("ntpdate not available, using systemd-timesyncd only")
+                return False
+            
+            self.logger.info("ntpdate found, attempting manual sync...")
             ntp_servers = [
                 'pool.ntp.org',
                 'time.google.com',

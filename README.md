@@ -74,7 +74,7 @@ If you prefer manual installation:
 1. **Install dependencies**:
    ```bash
    sudo apt update
-   sudo apt install -y vlc python3 python3-pip python3-venv git ffmpeg ntp ntpdate systemd-timesyncd python3-requests
+   sudo apt install -y vlc python3 python3-pip python3-venv git ffmpeg python3-requests python3-serial
    ```
 
 2. **Create directories**:

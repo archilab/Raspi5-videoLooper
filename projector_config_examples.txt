@@ -1,0 +1,138 @@
+# Example Projector Configuration Files
+# Place these files in your video folders to control projector behavior
+
+# ===========================================
+# projector.txt - Simple format example
+# ===========================================
+# Enable projector control
+enable_projector=true
+
+# Serial port (check with: python3 video_looper.py --list-ports)
+serial_port=/dev/ttyUSB0
+
+# Serial communication settings
+baud_rate=9600
+timeout=5
+
+# Projector commands (adjust for your projector model)
+start_command=PWR ON
+stop_command=PWR OFF
+
+# Timing settings (in seconds)
+start_delay=2
+stop_delay=1
+video_start_delay=5
+
+# Optional: Wait for projector response
+wait_for_response=false
+
+# ===========================================
+# projector.conf - JSON format example
+# ===========================================
+{
+    "enable_projector": true,
+    "serial_port": "/dev/ttyUSB0",
+    "baud_rate": 9600,
+    "timeout": 5,
+    "start_command": "PWR ON",
+    "stop_command": "PWR OFF",
+    "start_delay": 2,
+    "stop_delay": 1,
+    "video_start_delay": 5,
+    "wait_for_response": false
+}
+
+# ===========================================
+# Common Projector Commands by Brand
+# ===========================================
+
+# Epson projectors
+# start_command=PWR ON
+# stop_command=PWR OFF
+# status_command=PWR?
+
+# Sony projectors
+# start_command=PWR ON
+# stop_command=PWR OFF
+# status_command=PWR?
+
+# Panasonic projectors
+# start_command=PWR ON
+# stop_command=PWR OFF
+# status_command=PWR?
+
+# BenQ projectors
+# start_command=PWR ON
+# stop_command=PWR OFF
+# status_command=PWR?
+
+# Optoma projectors
+# start_command=PWR ON
+# stop_command=PWR OFF
+# status_command=PWR?
+
+# ===========================================
+# Configuration Options Explained
+# ===========================================
+
+# enable_projector: true/false
+#   - Enable or disable projector control for this folder
+
+# serial_port: /dev/ttyUSB0, /dev/ttyACM0, etc.
+#   - USB-to-serial adapter port
+#   - Use --list-ports to find available ports
+
+# baud_rate: 9600, 19200, 38400, 57600, 115200
+#   - Serial communication speed
+#   - Check your projector manual for correct baud rate
+
+# timeout: seconds
+#   - How long to wait for projector response
+
+# start_command: "PWR ON", "POWER ON", etc.
+#   - Command to turn projector on
+#   - Check your projector manual for exact command
+
+# stop_command: "PWR OFF", "POWER OFF", etc.
+#   - Command to turn projector off
+#   - Check your projector manual for exact command
+
+# start_delay: seconds
+#   - Delay before sending start command
+#   - Useful for projector warm-up time
+
+# stop_delay: seconds
+#   - Delay before sending stop command
+#   - Useful for projector cool-down time
+
+# video_start_delay: seconds
+#   - Delay before starting video playback
+#   - Allows projector to fully start before video begins
+
+# wait_for_response: true/false
+#   - Whether to wait for projector response
+#   - Some projectors send confirmation messages
+
+# ===========================================
+# Troubleshooting Tips
+# ===========================================
+
+# 1. Check serial port:
+#    python3 video_looper.py --list-ports
+
+# 2. Test projector connection:
+#    python3 video_looper.py --projector-test
+
+# 3. Test projector commands:
+#    python3 video_looper.py --projector-start
+#    python3 video_looper.py --projector-stop
+
+# 4. Check logs:
+#    sudo journalctl -u video-looper -f
+
+# 5. Common issues:
+#    - Wrong serial port (check with --list-ports)
+#    - Wrong baud rate (check projector manual)
+#    - Wrong commands (check projector manual)
+#    - USB-to-serial adapter not recognized
+#    - Projector not responding to commands

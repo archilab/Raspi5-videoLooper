@@ -79,23 +79,25 @@ If you prefer manual installation:
 
 2. **Create directories**:
    ```bash
-   mkdir -p /home/pi/video_looper
-   mkdir -p /home/pi/videos
+   mkdir -p /home/$USER/video_looper
+   mkdir -p /home/$USER/videos
    ```
 
 3. **Copy files**:
    ```bash
-   cp video_looper.py /home/pi/video_looper/
-   cp time_sync.py /home/pi/video_looper/
+   cp video_looper.py /home/$USER/video_looper/
+   cp time_sync.py /home/$USER/video_looper/
+   cp projector_controller.py /home/$USER/video_looper/
    sudo cp video-looper.service /etc/systemd/system/
    ```
 
 4. **Set permissions**:
    ```bash
-   chmod +x /home/pi/video_looper/video_looper.py
-   chmod +x /home/pi/video_looper/time_sync.py
-   sudo chown -R pi:pi /home/pi/video_looper
-   sudo chown -R pi:pi /home/pi/videos
+   chmod +x /home/$USER/video_looper/video_looper.py
+   chmod +x /home/$USER/video_looper/time_sync.py
+   chmod +x /home/$USER/video_looper/projector_controller.py
+   sudo chown -R $USER:$USER /home/$USER/video_looper
+   sudo chown -R $USER:$USER /home/$USER/videos
    ```
 
 5. **Configure time synchronization**:
@@ -115,14 +117,14 @@ If you prefer manual installation:
 
 ### Adding Videos
 
-1. **Create folders** with the naming convention in `/home/pi/videos/`
+1. **Create folders** with the naming convention in `/home/$USER/videos/`
 2. **Add video files** to the appropriate folders
 3. **The system will automatically detect and play videos** based on the current date and time
 
 ### Example Folder Structure
 
 ```
-/home/pi/videos/
+/home/$USER/videos/
 ├── 2024-01-01_to_2024-01-31_0900_to_1800/
 │   ├── morning_ad.mp4
 │   ├── product_demo.mp4
@@ -172,7 +174,7 @@ sudo systemctl disable video-looper
 
 **Test mode** (shows what would be played without starting VLC):
 ```bash
-cd /home/pi/video_looper
+cd /home/$USER/video_looper
 python3 video_looper.py --test
 ```
 
@@ -326,7 +328,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
 
 1. **Service won't start**:
    - Check if VLC is installed: `vlc --version`
-   - Verify Python script permissions: `ls -la /home/pi/video_looper/video_looper.py`
+   - Verify Python script permissions: `ls -la /home/$USER/video_looper/video_looper.py`
    - Check service logs: `sudo journalctl -u video-looper -n 50`
 
 2. **No videos playing**:
@@ -347,8 +349,8 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
    - Restart timesyncd: `sudo systemctl restart systemd-timesyncd`
 
 5. **Permission issues**:
-   - Ensure pi user owns directories: `sudo chown -R pi:pi /home/pi/videos`
-   - Check log file permissions: `sudo chown pi:pi /var/log/video_looper.log`
+   - Ensure current user owns directories: `sudo chown -R $USER:$USER /home/$USER/videos`
+   - Check log file permissions: `sudo chown $USER:$USER /var/log/video_looper.log`
 
 6. **Projector control issues**:
    - Check serial port: `python3 video_looper.py --list-ports`
@@ -379,8 +381,8 @@ sudo journalctl -u video-looper -f
 
 Run the script manually for debugging:
 ```bash
-cd /home/pi/video_looper
-python3 video_looper.py --videos-path /home/pi/videos
+cd /home/$USER/video_looper
+python3 video_looper.py --videos-path /home/$USER/videos
 ```
 
 ## Advanced Usage

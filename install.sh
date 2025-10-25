@@ -103,6 +103,9 @@ sudo sed -i "s|INSTALL_DIR_PLACEHOLDER|$INSTALL_DIR|g" "$SERVICE_FILE"
 sudo sed -i "s|HOME_PLACEHOLDER|/home/$USER|g" "$SERVICE_FILE"
 sudo sed -i "s|VIDEOS_DIR_PLACEHOLDER|$VIDEOS_DIR|g" "$SERVICE_FILE"
 
+# Update the config file to use the correct paths and user
+sudo sed -i "s|USER_PLACEHOLDER|$USER|g" "$INSTALL_DIR/config.conf"
+
 # Reload systemd and enable the service
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"

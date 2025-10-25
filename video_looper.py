@@ -18,7 +18,13 @@ from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 
 class VideoLooper:
-    def __init__(self, videos_path="/home/pi/videos", log_file="/var/log/video_looper.log"):
+    def __init__(self, videos_path=None, log_file=None):
+        # Use dynamic paths based on current user
+        if videos_path is None:
+            videos_path = f"/home/{os.getenv('USER', 'pi')}/videos"
+        if log_file is None:
+            log_file = "/var/log/video_looper.log"
+            
         self.videos_path = Path(videos_path)
         self.log_file = log_file
         self.current_process = None
@@ -295,8 +301,8 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Raspberry Pi Video Looper')
-    parser.add_argument('--videos-path', default='/home/pi/videos',
-                       help='Path to videos directory (default: /home/pi/videos)')
+    parser.add_argument('--videos-path', default=None,
+                       help=f'Path to videos directory (default: /home/{os.getenv("USER", "pi")}/videos)')
     parser.add_argument('--log-file', default='/var/log/video_looper.log',
                        help='Log file path (default: /var/log/video_looper.log)')
     parser.add_argument('--test', action='store_true',

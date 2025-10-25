@@ -7,7 +7,7 @@ echo "This script will help you set up example folders and test the system."
 echo ""
 
 # Create example folders with different schedules
-VIDEOS_DIR="/home/pi/videos"
+VIDEOS_DIR="/home/$USER/videos"
 
 echo "Creating example folder structure..."
 
@@ -104,7 +104,7 @@ echo "=== Next Steps ==="
 echo ""
 echo "1. Replace the empty .mp4 files with your actual video files"
 echo "2. Test the system:"
-echo "   cd /home/pi/video_looper"
+echo "   cd /home/$USER/video_looper"
 echo "   python3 video_looper.py --test"
 echo ""
 echo "3. Start the service:"
@@ -155,7 +155,7 @@ done
 
 echo ""
 echo "=== Quick Commands ==="
-echo "Test system:     python3 /home/pi/video_looper/video_looper.py --test"
+echo "Test system:     python3 /home/$USER/video_looper/video_looper.py --test"
 echo "Start service:   sudo systemctl start video-looper"
 echo "Stop service:    sudo systemctl stop video-looper"
 echo "Restart service: sudo systemctl restart video-looper"

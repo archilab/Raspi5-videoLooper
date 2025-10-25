@@ -10,6 +10,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Dynamic paths based on current user
+USER_HOME="/home/$USER"
+VIDEO_LOOPER_DIR="$USER_HOME/video_looper"
+VIDEOS_DIR="$USER_HOME/videos"
+
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -72,26 +77,26 @@ check_dependencies() {
 check_files() {
     echo -e "${YELLOW}Checking files and permissions...${NC}"
     
-    if [ -f "/home/pi/video_looper/video_looper.py" ]; then
+    if [ -f "$VIDEO_LOOPER_DIR/video_looper.py" ]; then
         echo -e "${GREEN}✓ Main script exists${NC}"
-        if [ -x "/home/pi/video_looper/video_looper.py" ]; then
+        if [ -x "$VIDEO_LOOPER_DIR/video_looper.py" ]; then
             echo -e "${GREEN}✓ Main script is executable${NC}"
         else
             echo -e "${RED}✗ Main script is not executable${NC}"
-            echo "Fix with: chmod +x /home/pi/video_looper/video_looper.py"
+            echo "Fix with: chmod +x $VIDEO_LOOPER_DIR/video_looper.py"
         fi
     else
         echo -e "${RED}✗ Main script not found${NC}"
-        echo "Expected: /home/pi/video_looper/video_looper.py"
+        echo "Expected: $VIDEO_LOOPER_DIR/video_looper.py"
     fi
     
-    if [ -d "/home/pi/videos" ]; then
+    if [ -d "$VIDEOS_DIR" ]; then
         echo -e "${GREEN}✓ Videos directory exists${NC}"
-        video_count=$(find /home/pi/videos -name "*.mp4" -o -name "*.avi" -o -name "*.mov" -o -name "*.mkv" | wc -l)
+        video_count=$(find "$VIDEOS_DIR" -name "*.mp4" -o -name "*.avi" -o -name "*.mov" -o -name "*.mkv" | wc -l)
         echo "  Found $video_count video files"
     else
         echo -e "${RED}✗ Videos directory not found${NC}"
-        echo "Create with: mkdir -p /home/pi/videos"
+        echo "Create with: mkdir -p $VIDEOS_DIR"
     fi
     
     if [ -f "/etc/systemd/system/video-looper.service" ]; then
@@ -123,7 +128,7 @@ check_logs() {
 test_folder_parsing() {
     echo -e "${YELLOW}Testing folder parsing...${NC}"
     
-    cd /home/pi/video_looper
+    cd "$VIDEO_LOOPER_DIR"
     if python3 video_looper.py --test; then
         echo -e "${GREEN}✓ Folder parsing test passed${NC}"
     else
@@ -135,7 +140,7 @@ test_folder_parsing() {
 check_time_sync() {
     echo -e "${YELLOW}Checking time synchronization...${NC}"
     
-    cd /home/pi/video_looper
+    cd "$VIDEO_LOOPER_DIR"
     if python3 video_looper.py --time-status; then
         echo -e "${GREEN}✓ Time sync status retrieved${NC}"
     else
@@ -159,7 +164,7 @@ check_time_sync() {
 check_projector() {
     echo -e "${YELLOW}Checking projector configuration...${NC}"
     
-    cd /home/pi/video_looper
+    cd "$VIDEO_LOOPER_DIR"
     echo "Available serial ports:"
     if python3 video_looper.py --list-ports; then
         echo -e "${GREEN}✓ Serial ports listed successfully${NC}"
@@ -177,7 +182,7 @@ check_projector() {
     
     echo ""
     echo "Projector configuration files found:"
-    find /home/pi/videos -name "projector.txt" -o -name "projector.conf" -o -name "config.txt" 2>/dev/null | while read file; do
+    find "$VIDEOS_DIR" -name "projector.txt" -o -name "projector.conf" -o -name "config.txt" 2>/dev/null | while read file; do
         echo "  $file"
         if [ -f "$file" ]; then
             echo "    Content preview:"
@@ -210,9 +215,9 @@ show_current_status() {
     echo "Current time: $(date '+%H:%M')"
     echo ""
     
-    echo "Folders in /home/pi/videos:"
-    if [ -d "/home/pi/videos" ]; then
-        for folder in /home/pi/videos/*; do
+    echo "Folders in $VIDEOS_DIR:"
+    if [ -d "$VIDEOS_DIR" ]; then
+        for folder in "$VIDEOS_DIR"/*; do
             if [ -d "$folder" ]; then
                 folder_name=$(basename "$folder")
                 echo "  $folder_name"
@@ -251,7 +256,7 @@ echo ""
 echo "Common fixes:"
 echo "1. If service won't start: sudo systemctl restart video-looper"
 echo "2. If VLC fails: sudo apt install --reinstall vlc"
-echo "3. If permissions wrong: sudo chown -R pi:pi /home/pi/videos"
+echo "3. If permissions wrong: sudo chown -R $USER $VIDEOS_DIR"
 echo "4. If no videos found: Check folder naming convention"
 echo "5. If display issues: export DISPLAY=:0"
 echo ""

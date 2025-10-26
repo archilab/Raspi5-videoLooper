@@ -42,7 +42,20 @@ class ProjectorController:
                     if line and not line.startswith('#'):
                         if '=' in line:
                             key, value = line.split('=', 1)
-                            self.config[key.strip()] = value.strip()
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Convert boolean and numeric values
+                            if value.lower() == 'true':
+                                self.config[key] = True
+                            elif value.lower() == 'false':
+                                self.config[key] = False
+                            elif value.isdigit():
+                                self.config[key] = int(value)
+                            elif value.replace('.', '', 1).isdigit():
+                                self.config[key] = float(value)
+                            else:
+                                self.config[key] = value
             
             self.logger.info(f"Loaded projector config: {self.config}")
             return True

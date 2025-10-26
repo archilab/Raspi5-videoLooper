@@ -28,6 +28,7 @@ class VideoLooper:
         self.videos_path = Path(videos_path)
         self.log_file = log_file
         self.current_process = None
+        self.current_folder = None
         self.running = True
         
         # Setup logging
@@ -108,7 +109,12 @@ class VideoLooper:
             return False
         
         # Check if current time is within the daily time range
-        if not (schedule['start_time'] <= current_time <= schedule['end_time']):
+        # Create datetime objects for proper time comparison
+        start_datetime = datetime.combine(now.date(), schedule['start_time'])
+        end_datetime = datetime.combine(now.date(), schedule['end_time'])
+        current_datetime = datetime.combine(now.date(), current_time)
+        
+        if not (start_datetime <= current_datetime <= end_datetime):
             return False
         
         return True
@@ -123,6 +129,17 @@ class VideoLooper:
                 video_files.append(file_path)
         
         return sorted(video_files)
+    
+    def has_projector_config(self, folder_path):
+        """Check if folder has projector configuration file"""
+        config_files = ['projector.txt', 'projector.conf', 'config.txt']
+        
+        for config_file in config_files:
+            config_path = folder_path / config_file
+            if config_path.exists():
+                return True
+        
+        return False
     
     def load_projector_config(self, folder_path):
         """Load projector configuration from folder"""
@@ -141,10 +158,15 @@ class VideoLooper:
     def handle_video_start_delay(self, folder_path):
         """Handle video start delay if configured"""
         start_delay = self.projector.config.get('video_start_delay', 0)
-        if start_delay > 0:
-            self.logger.info(f"Video start delay configured: {start_delay} seconds")
-            time.sleep(start_delay)
-            return True
+        # Convert to int in case it's a string from config file
+        try:
+            start_delay = int(start_delay)
+            if start_delay > 0:
+                self.logger.info(f"Video start delay configured: {start_delay} seconds")
+                time.sleep(start_delay)
+                return True
+        except (ValueError, TypeError):
+            self.logger.warning(f"Invalid video_start_delay value: {start_delay}")
         return False
     
     def find_active_folder(self):
@@ -177,26 +199,31 @@ class VideoLooper:
             self.logger.error("No video files provided")
             return False
         
-        # Load projector configuration for this folder
-        self.load_projector_config(folder_path)
-        
-        # Connect to projector if enabled
-        if self.projector.config.get('enable_projector', False):
-            if not self.projector.connect():
-                self.logger.warning("Failed to connect to projector, continuing without projector control")
-        
-        # Start projector if enabled
-        if self.projector.config.get('enable_projector', False):
-            self.logger.info("Starting projector...")
-            if not self.projector.start_projector():
-                self.logger.warning("Failed to start projector")
-        
-        # Handle video start delay
-        self.handle_video_start_delay(folder_path)
+        # Only load and use projector config if projector.txt exists in folder
+        if self.has_projector_config(folder_path):
+            self.logger.info("Projector config file found in folder")
+            # Load projector configuration for this folder
+            self.load_projector_config(folder_path)
+            
+            # Connect to projector if enabled
+            if self.projector.config.get('enable_projector', False):
+                if not self.projector.connect():
+                    self.logger.warning("Failed to connect to projector, continuing without projector control")
+            
+            # Start projector if enabled
+            if self.projector.config.get('enable_projector', False):
+                self.logger.info("Starting projector...")
+                if not self.projector.start_projector():
+                    self.logger.warning("Failed to start projector")
+            
+            # Handle video start delay
+            self.handle_video_start_delay(folder_path)
+        else:
+            self.logger.info("No projector config file found, skipping projector control")
         
         # Create VLC command
         vlc_cmd = [
-            'vlc',
+            'cvlc',
             '--intf', 'dummy',  # No GUI
             '--no-video-title-show',  # Don't show video title
             '--fullscreen',  # Fullscreen mode
@@ -216,6 +243,8 @@ class VideoLooper:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
+            # Store current folder for stop operations
+            self.current_folder = folder_path
             return True
         except Exception as e:
             self.logger.error(f"Failed to start VLC: {e}")
@@ -237,12 +266,15 @@ class VideoLooper:
             finally:
                 self.current_process = None
         
-        # Stop projector if enabled
-        if self.projector.config.get('enable_projector', False):
-            self.logger.info("Stopping projector...")
-            if not self.projector.stop_projector():
-                self.logger.warning("Failed to stop projector")
-            self.projector.disconnect()
+        # Stop projector only if there's a config file for the current folder
+        if self.current_folder and self.has_projector_config(self.current_folder):
+            if self.projector.config.get('enable_projector', False):
+                self.logger.info("Stopping projector...")
+                if not self.projector.stop_projector():
+                    self.logger.warning("Failed to stop projector")
+                self.projector.disconnect()
+        
+        self.current_folder = None
     
     def run(self):
         """Main loop"""

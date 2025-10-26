@@ -6,7 +6,7 @@ This project creates an automated video looper system for Raspberry Pi 5 that us
 
 ## Features
 
-- **Headless VLC Operation**: Runs VLC without GUI for optimal performance
+- **Headless VLC Operation**: Runs cvlc (command-line VLC) without GUI for optimal performance
 - **Date/Time Scheduling**: Control video playback through folder naming
 - **Automatic Time Synchronization**: Uses NTP when internet is available, falls back to RTC
 - **Projector Control**: USB-to-serial communication with projectors/beamers
@@ -341,6 +341,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
    - Check if display is available: `echo $DISPLAY`
    - Verify video file formats are supported
    - Check VLC installation: `sudo apt install --reinstall vlc`
+   - Try cvlc directly: `cvlc --version`
 
 4. **Time synchronization issues**:
    - Check NTP status: `timedatectl status`

@@ -52,16 +52,17 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$VIDEOS_DIR"
 
 echo -e "${GREEN}Step 4: Copying files...${NC}"
-# Copy the video looper script
-cp video_looper.py "$INSTALL_DIR/"
-cp time_sync.py "$INSTALL_DIR/"
-cp projector_controller.py "$INSTALL_DIR/"
+# Copy the video looper script (force overwrite)
+cp -f video_looper.py "$INSTALL_DIR/"
+cp -f time_sync.py "$INSTALL_DIR/"
+cp -f projector_controller.py "$INSTALL_DIR/"
+cp -f config.conf "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/video_looper.py"
 chmod +x "$INSTALL_DIR/time_sync.py"
 chmod +x "$INSTALL_DIR/projector_controller.py"
 
-# Copy the systemd service file
-sudo cp video-looper.service "$SERVICE_FILE"
+# Copy the systemd service file (force overwrite)
+sudo cp -f video-looper.service "$SERVICE_FILE"
 
 echo -e "${GREEN}Step 5: Setting up Python environment...${NC}"
 cd "$INSTALL_DIR"

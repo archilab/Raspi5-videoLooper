@@ -221,16 +221,15 @@ class VideoLooper:
         else:
             self.logger.info("No projector config file found, skipping projector control")
         
-        # Create VLC command
+        # Create VLC command using vlc-wrapper for proper permissions
         vlc_cmd = [
-            'cvlc',
+            '/usr/bin/vlc-wrapper',
             '--intf', 'dummy',  # No GUI
-            '--no-video-title-show',  # Don't show video title
             '--fullscreen',  # Fullscreen mode
             '--loop',  # Loop the playlist
+            '--no-osd',  # No on-screen display
             '--no-audio-display',  # Don't show audio info
             '--quiet',  # Reduce output
-            '--no-osd',  # No on-screen display
         ]
         
         # Add all video files to the command
@@ -238,16 +237,24 @@ class VideoLooper:
         
         try:
             self.logger.info(f"Starting VLC with {len(video_files)} video files")
+            self.logger.info(f"VLC command: {' '.join(vlc_cmd)}")
+            
+            # Create log file for VLC output
+            vlc_log_file = self.log_file.replace('.log', '_vlc.log')
+            
             self.current_process = subprocess.Popen(
                 vlc_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stdout=open(vlc_log_file, 'a'),
+                stderr=subprocess.STDOUT
             )
+            self.logger.info(f"VLC process started with PID: {self.current_process.pid}")
             # Store current folder for stop operations
             self.current_folder = folder_path
             return True
         except Exception as e:
             self.logger.error(f"Failed to start VLC: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
     
     def stop_video(self):

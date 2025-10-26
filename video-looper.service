@@ -22,8 +22,10 @@ Environment=HOME=HOME_PLACEHOLDER
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=VIDEOS_DIR_PLACEHOLDER /var/log
+ReadWritePaths=VIDEOS_DIR_PLACEHOLDER /var/log /tmp /run/user/1000 /run/user/1000/.X11-unix /tmp/.X11-unix
+
+# Allow X11 access for VLC
+Environment=XAUTHORITY=HOME_PLACEHOLDER/.Xauthority
 
 [Install]
 WantedBy=graphical.target

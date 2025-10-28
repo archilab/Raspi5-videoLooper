@@ -39,7 +39,8 @@ YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 ## Installation
 
 ### Prerequisites
-- Raspberry Pi 5 with Raspberry Pi OS
+- Raspberry Pi 5 with Raspberry Pi OS (lite)
+- unprivileged second User for VLC service (does not work with root)
 - Internet connection for package installation and NTP synchronization
 - Video files in supported formats (MP4, AVI, MOV, MKV, WMV, FLV, WebM, M4V)
 - USB-to-serial adapter for projector control (optional)

@@ -10,16 +10,33 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-INSTALL_DIR="/home/$USER/video_looper"
-VIDEOS_DIR="/home/$USER/videos"
+# Ask for the unprivileged user to run the service
+if [ -z "$SERVICE_USER" ]; then
+    echo -e "${YELLOW}Enter the unprivileged username to run the video looper service (default: $USER):${NC}"
+    read -p "Username: " SERVICE_USER
+    SERVICE_USER=${SERVICE_USER:-$USER}
+fi
+
+if [ "$SERVICE_USER" = "root" ]; then
+    echo -e "${RED}Error: Cannot use 'root' as service user. Please specify a regular user.${NC}"
+    exit 1
+fi
+
+# Set paths based on service user
+INSTALL_DIR="/home/$SERVICE_USER/video_looper"
+VIDEOS_DIR="/home/$SERVICE_USER/videos"
 SERVICE_NAME="video-looper"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-echo -e "${GREEN}=== Raspberry Pi Video Looper Installation ===${NC}"
+echo -e "${GREEN}Configuration:${NC}"
+echo "  Service User: $SERVICE_USER"
+echo "  Install Directory: $INSTALL_DIR"
+echo "  Videos Directory: $VIDEOS_DIR"
+echo ""
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-   echo -e "${RED}This script should not be run as root. Please run as $USER user.${NC}"
+   echo -e "${RED}This script should not be run as root. Please run as sudo (not root).${NC}"
    exit 1
 fi
 
@@ -99,27 +116,27 @@ echo -e "${GREEN}✓ Time synchronization configured${NC}"
 
 echo -e "${GREEN}Step 7: Configuring systemd service...${NC}"
 # Update the service file to use the correct paths and user
-sudo sed -i "s|USER_PLACEHOLDER|$USER|g" "$SERVICE_FILE"
+sudo sed -i "s|USER_PLACEHOLDER|$SERVICE_USER|g" "$SERVICE_FILE"
 sudo sed -i "s|INSTALL_DIR_PLACEHOLDER|$INSTALL_DIR|g" "$SERVICE_FILE"
-sudo sed -i "s|HOME_PLACEHOLDER|/home/$USER|g" "$SERVICE_FILE"
+sudo sed -i "s|HOME_PLACEHOLDER|/home/$SERVICE_USER|g" "$SERVICE_FILE"
 sudo sed -i "s|VIDEOS_DIR_PLACEHOLDER|$VIDEOS_DIR|g" "$SERVICE_FILE"
 
 # Update the config file to use the correct paths and user
-sudo sed -i "s|USER_PLACEHOLDER|$USER|g" "$INSTALL_DIR/config.conf"
+sudo sed -i "s|USER_PLACEHOLDER|$SERVICE_USER|g" "$INSTALL_DIR/config.conf"
 
 # Reload systemd and enable the service
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 
 echo -e "${GREEN}Step 8: Setting up permissions...${NC}"
-# Ensure current user owns the directories
-sudo chown -R $USER:$USER "$INSTALL_DIR"
-sudo chown -R $USER:$USER "$VIDEOS_DIR"
+# Ensure service user owns the directories
+sudo chown -R $SERVICE_USER:$SERVICE_USER "$INSTALL_DIR"
+sudo chown -R $SERVICE_USER:$SERVICE_USER "$VIDEOS_DIR"
 
 # Create log directory if it doesn't exist
 sudo mkdir -p /var/log
 sudo touch /var/log/video_looper.log
-sudo chown $USER:$USER /var/log/video_looper.log
+sudo chown $SERVICE_USER:$SERVICE_USER /var/log/video_looper.log
 
 echo -e "${GREEN}Step 9: Testing installation...${NC}"
 # Test the script

@@ -221,9 +221,9 @@ class VideoLooper:
         else:
             self.logger.info("No projector config file found, skipping projector control")
         
-        # Create VLC command using vlc-wrapper for proper permissions
+        # Create VLC command using cvlc (command-line VLC)
         vlc_cmd = [
-            '/usr/bin/vlc-wrapper',
+            'cvlc',
             '--intf', 'dummy',  # No GUI
             '--fullscreen',  # Fullscreen mode
             '--loop',  # Loop the playlist
@@ -239,8 +239,10 @@ class VideoLooper:
             self.logger.info(f"Starting VLC with {len(video_files)} video files")
             self.logger.info(f"VLC command: {' '.join(vlc_cmd)}")
             
-            # Create log file for VLC output
-            vlc_log_file = self.log_file.replace('.log', '_vlc.log')
+            # Create log file for VLC output in user-writable location
+            import os
+            user_home = os.path.expanduser('~')
+            vlc_log_file = os.path.join(user_home, 'video_looper_vlc.log')
             
             self.current_process = subprocess.Popen(
                 vlc_cmd,

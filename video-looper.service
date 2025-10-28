@@ -14,18 +14,11 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
-# Environment variables
+# Environment variables for VLC
 Environment=DISPLAY=:0
 Environment=HOME=HOME_PLACEHOLDER
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=VIDEOS_DIR_PLACEHOLDER /var/log /tmp /run/user/1000 /run/user/1000/.X11-unix /tmp/.X11-unix
-
-# Allow X11 access for VLC
-Environment=XAUTHORITY=HOME_PLACEHOLDER/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=QT_QPA_PLATFORM=xcb
 
 [Install]
 WantedBy=graphical.target

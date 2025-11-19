@@ -228,7 +228,7 @@ class VideoLooper:
             '--fullscreen',  # Fullscreen mode
             '--loop',  # Loop the playlist
             '--no-osd',  # No on-screen display
-            '--no-audio-display',  # Don't show audio info
+            '--no-audio',  # no audio
             '--quiet',  # Reduce output
         ]
         

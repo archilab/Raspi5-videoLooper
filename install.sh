@@ -57,7 +57,8 @@ sudo apt install -y \
     git \
     ffmpeg \
     python3-requests \
-    python3-serial
+    python3-serial \
+    cec-utils
 
 echo -e "${GREEN}Step 3: Creating directories...${NC}"
 sudo mkdir -p "$INSTALL_DIR"
@@ -71,10 +72,12 @@ echo -e "${GREEN}Step 4: Copying files...${NC}"
 sudo cp -f video_looper.py "$INSTALL_DIR/"
 sudo cp -f time_sync.py "$INSTALL_DIR/"
 sudo cp -f projector_controller.py "$INSTALL_DIR/"
+sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
+sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 
 echo -e "${GREEN}Step 5: Setting up Python environment...${NC}"
 # Create Python virtual environment as looper user

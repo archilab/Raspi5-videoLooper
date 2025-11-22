@@ -16,12 +16,13 @@ import signal
 import json
 from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
+from hdmi_controller import HDMIController
 
 class VideoLooper:
     def __init__(self, videos_path=None, log_file=None):
-        # Use dynamic paths based on current user
+        # Use fixed paths for looper user
         if videos_path is None:
-            videos_path = f"/home/{os.getenv('USER', 'pi')}/videos"
+            videos_path = "/home/looper/videos"
         if log_file is None:
             log_file = "/var/log/video_looper.log"
             
@@ -39,6 +40,9 @@ class VideoLooper:
         
         # Initialize projector controller
         self.projector = ProjectorController(log_file)
+        
+        # Initialize HDMI controller
+        self.hdmi = HDMIController(log_file)
         
         # Signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -62,7 +66,7 @@ class VideoLooper:
         """Handle shutdown signals"""
         self.logger.info(f"Received signal {signum}, shutting down gracefully...")
         self.running = False
-        self.stop_video()
+        self.stop_video(standby_hdmi=True)
         self.time_sync.stop_background_sync()
         self.projector.disconnect()
         sys.exit(0)
@@ -199,6 +203,15 @@ class VideoLooper:
             self.logger.error("No video files provided")
             return False
         
+        # Wake HDMI display before starting video playback
+        if self.hdmi.is_available():
+            self.logger.info("Waking HDMI display...")
+            if not self.hdmi.wake_hdmi():
+                self.logger.warning("Failed to wake HDMI display, continuing anyway")
+            else:
+                # Give display time to wake up
+                time.sleep(2)
+        
         # Only load and use projector config if projector.txt exists in folder
         if self.has_projector_config(folder_path):
             self.logger.info("Projector config file found in folder")
@@ -259,8 +272,12 @@ class VideoLooper:
             self.logger.error(traceback.format_exc())
             return False
     
-    def stop_video(self):
-        """Stop the current video playback and projector"""
+    def stop_video(self, standby_hdmi=False):
+        """
+        Stop the current video playback and projector
+        Args:
+            standby_hdmi: If True, put HDMI display in standby after stopping video
+        """
         if self.current_process:
             try:
                 self.current_process.terminate()
@@ -283,7 +300,115 @@ class VideoLooper:
                     self.logger.warning("Failed to stop projector")
                 self.projector.disconnect()
         
+        # Clear the screen/framebuffer when video stops (before standby)
+        # Only clear if we're actually stopping (not just switching folders)
+        if standby_hdmi:
+            self.clear_display()
+        
+        # Put HDMI display in standby if requested (when no active folder)
+        if standby_hdmi and self.hdmi.is_available():
+            # Small delay to ensure video process is fully stopped and display is cleared
+            time.sleep(1)
+            self.logger.info("Putting HDMI display in standby...")
+            if not self.hdmi.standby_hdmi():
+                self.logger.warning("Failed to put HDMI display in standby")
+            else:
+                self.logger.info("HDMI display put in standby")
+        
         self.current_folder = None
+    
+    def clear_display(self):
+        """Clear the HDMI display/framebuffer to show blank screen"""
+        try:
+            self.logger.info("Clearing display...")
+            
+            # Method 1: Use fbset to blank the display (safe method)
+            try:
+                result = subprocess.run(
+                    ['fbset', '-blank'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=2,
+                    check=False
+                )
+                if result.returncode == 0:
+                    self.logger.debug("Display cleared using fbset")
+                    return
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+            
+            # Method 2: Use setterm to clear console (if available)
+            try:
+                subprocess.run(
+                    ['setterm', '-blank', 'force', '-term', 'linux'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=False
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+            
+            # Method 3: Clear framebuffer by writing black to /dev/fb0 (if accessible)
+            if os.path.exists('/dev/fb0'):
+                try:
+                    # Get display resolution from fbset or use defaults
+                    # Common Raspberry Pi resolutions: 1920x1080, 1280x720, 800x600
+                    # Try to detect resolution, fallback to Full HD
+                    width = 1920
+                    height = 1080
+                    
+                    # Try to get actual resolution
+                    try:
+                        result = subprocess.run(
+                            ['fbset', '-s'],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            timeout=2,
+                            text=True,
+                            check=False
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split('\n'):
+                                if 'geometry' in line:
+                                    parts = line.split()
+                                    if len(parts) >= 3:
+                                        width = int(parts[1])
+                                        height = int(parts[2])
+                                    break
+                    except Exception:
+                        pass
+                    
+                    # Calculate buffer size (width * height * bytes_per_pixel)
+                    # Assume 32-bit color (RGBA) = 4 bytes per pixel
+                    buffer_size = width * height * 4
+                    
+                    # Write black pixels to framebuffer
+                    with open('/dev/fb0', 'wb') as fb:
+                        fb.write(b'\x00' * min(buffer_size, 1920 * 1080 * 4))
+                    
+                    self.logger.debug(f"Display framebuffer cleared ({width}x{height})")
+                    
+                except (PermissionError, OSError) as e:
+                    self.logger.debug(f"Could not clear framebuffer directly: {e}")
+                except Exception as e:
+                    self.logger.debug(f"Error clearing framebuffer: {e}")
+            
+            # Method 4: Fallback - use clear command for terminal
+            try:
+                subprocess.run(
+                    ['clear'],
+                    timeout=1,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+                
+        except Exception as e:
+            # Don't log errors for display clearing - it's not critical
+            self.logger.debug(f"Could not clear display: {e}")
     
     def run(self):
         """Main loop"""
@@ -312,17 +437,24 @@ class VideoLooper:
                     # If we're playing a different folder, switch
                     if current_folder != folder_path:
                         self.logger.info(f"Switching to folder: {folder_path.name}")
-                        self.stop_video()
+                        self.stop_video(standby_hdmi=False)  # Don't standby during folder switch
                         if self.start_video(video_files, folder_path):
                             current_folder = folder_path
                         else:
                             current_folder = None
                 else:
-                    # No active folder, stop video if playing
-                    if current_folder:
+                    # No active folder - check if video is actually playing
+                    if self.current_folder is not None or self.current_process is not None:
                         self.logger.info("No active folders, stopping video")
-                        self.stop_video()
+                        self.stop_video(standby_hdmi=True)  # Standby when no active folder
                         current_folder = None
+                    # Also ensure HDMI is in standby even if we already stopped
+                    elif self.hdmi.is_available():
+                        # Double-check HDMI state and put to standby if needed
+                        hdmi_state = self.hdmi.get_hdmi_power()
+                        if hdmi_state == 1:
+                            self.logger.info("No active folders and HDMI is still on, putting HDMI in standby")
+                            self.hdmi.standby_hdmi()
                 
                 # Wait before checking again
                 time.sleep(30)  # Check every 30 seconds
@@ -333,7 +465,7 @@ class VideoLooper:
                 self.logger.error(f"Error in main loop: {e}")
                 time.sleep(60)  # Wait longer on error
         
-        self.stop_video()
+        self.stop_video(standby_hdmi=True)
         self.time_sync.stop_background_sync()
         self.logger.info("Video looper stopped")
 
@@ -343,7 +475,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Raspberry Pi Video Looper')
     parser.add_argument('--videos-path', default=None,
-                       help=f'Path to videos directory (default: /home/{os.getenv("USER", "pi")}/videos)')
+                       help='Path to videos directory (default: /home/looper/videos)')
     parser.add_argument('--log-file', default='/var/log/video_looper.log',
                        help='Log file path (default: /var/log/video_looper.log)')
     parser.add_argument('--test', action='store_true',

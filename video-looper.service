@@ -5,10 +5,10 @@ Wants=graphical-session.target
 
 [Service]
 Type=simple
-User=USER_PLACEHOLDER
-Group=USER_PLACEHOLDER
-WorkingDirectory=INSTALL_DIR_PLACEHOLDER
-ExecStart=/usr/bin/python3 INSTALL_DIR_PLACEHOLDER/video_looper.py
+User=looper
+Group=looper
+WorkingDirectory=/home/looper/video_looper
+ExecStart=/usr/bin/python3 /home/looper/video_looper/video_looper.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -16,7 +16,7 @@ StandardError=journal
 
 # Environment variables for VLC
 Environment=DISPLAY=:0
-Environment=HOME=HOME_PLACEHOLDER
+Environment=HOME=/home/looper
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=QT_QPA_PLATFORM=xcb
 

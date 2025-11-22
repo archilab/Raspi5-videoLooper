@@ -10,10 +10,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Dynamic paths based on current user
-USER_HOME="/home/$USER"
-VIDEO_LOOPER_DIR="$USER_HOME/video_looper"
-VIDEOS_DIR="$USER_HOME/videos"
+# Paths for looper user
+VIDEO_LOOPER_DIR="/home/looper/video_looper"
+VIDEOS_DIR="/home/looper/videos"
 
 # Function to check if command exists
 command_exists() {
@@ -256,7 +255,7 @@ echo ""
 echo "Common fixes:"
 echo "1. If service won't start: sudo systemctl restart video-looper"
 echo "2. If VLC fails: sudo apt install --reinstall vlc"
-echo "3. If permissions wrong: sudo chown -R $USER $VIDEOS_DIR"
+echo "3. If permissions wrong: sudo chown -R looper:looper $VIDEOS_DIR"
 echo "4. If no videos found: Check folder naming convention"
 echo "5. If display issues: export DISPLAY=:0"
 echo ""

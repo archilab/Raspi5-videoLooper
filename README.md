@@ -40,8 +40,8 @@ YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 
 ### Prerequisites
 - Raspberry Pi 5 with Raspberry Pi OS (lite)
-- unprivileged second User for VLC service (does not work with root)
 - Internet connection for package installation and NTP synchronization
+- The installation script will automatically create the "looper" user if it doesn't exist
 - Video files in supported formats (MP4, AVI, MOV, MKV, WMV, FLV, WebM, M4V)
 - USB-to-serial adapter for projector control (optional)
 
@@ -58,10 +58,11 @@ YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
    ```
 
 The installation script will:
+- Create the "looper" user (if it doesn't exist)
 - Update system packages
 - Install VLC, Python dependencies, and time synchronization tools
 - Configure NTP synchronization with multiple servers
-- Create necessary directories
+- Create necessary directories (`/home/looper/video_looper` and `/home/looper/videos`)
 - Copy files to appropriate locations
 - Set up the systemd service
 - Configure permissions
@@ -78,36 +79,41 @@ If you prefer manual installation:
    sudo apt install -y vlc python3 python3-pip python3-venv git ffmpeg python3-requests python3-serial
    ```
 
-2. **Create directories**:
+2. **Create looper user** (if it doesn't exist):
    ```bash
-   mkdir -p /home/$USER/video_looper
-   mkdir -p /home/$USER/videos
+   sudo useradd -m -s /bin/bash looper
    ```
 
-3. **Copy files**:
+3. **Create directories**:
    ```bash
-   cp video_looper.py /home/$USER/video_looper/
-   cp time_sync.py /home/$USER/video_looper/
-   cp projector_controller.py /home/$USER/video_looper/
+   sudo mkdir -p /home/looper/video_looper
+   sudo mkdir -p /home/looper/videos
+   ```
+
+4. **Copy files**:
+   ```bash
+   sudo cp video_looper.py /home/looper/video_looper/
+   sudo cp time_sync.py /home/looper/video_looper/
+   sudo cp projector_controller.py /home/looper/video_looper/
    sudo cp video-looper.service /etc/systemd/system/
    ```
 
-4. **Set permissions**:
+5. **Set permissions**:
    ```bash
-   chmod +x /home/$USER/video_looper/video_looper.py
-   chmod +x /home/$USER/video_looper/time_sync.py
-   chmod +x /home/$USER/video_looper/projector_controller.py
-   sudo chown -R $USER:$USER /home/$USER/video_looper
-   sudo chown -R $USER:$USER /home/$USER/videos
+   sudo chmod +x /home/looper/video_looper/video_looper.py
+   sudo chmod +x /home/looper/video_looper/time_sync.py
+   sudo chmod +x /home/looper/video_looper/projector_controller.py
+   sudo chown -R looper:looper /home/looper/video_looper
+   sudo chown -R looper:looper /home/looper/videos
    ```
 
-5. **Configure time synchronization**:
+6. **Configure time synchronization**:
    ```bash
    sudo systemctl enable systemd-timesyncd
    sudo systemctl start systemd-timesyncd
    ```
 
-6. **Enable and start service**:
+7. **Enable and start service**:
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable video-looper
@@ -118,14 +124,14 @@ If you prefer manual installation:
 
 ### Adding Videos
 
-1. **Create folders** with the naming convention in `/home/$USER/videos/`
+1. **Create folders** with the naming convention in `/home/looper/videos/`
 2. **Add video files** to the appropriate folders
 3. **The system will automatically detect and play videos** based on the current date and time
 
 ### Example Folder Structure
 
 ```
-/home/$USER/videos/
+/home/looper/videos/
 ├── 2024-01-01_to_2024-01-31_0900_to_1800/
 │   ├── morning_ad.mp4
 │   ├── product_demo.mp4
@@ -175,7 +181,7 @@ sudo systemctl disable video-looper
 
 **Test mode** (shows what would be played without starting VLC):
 ```bash
-cd /home/$USER/video_looper
+cd /home/looper/video_looper
 python3 video_looper.py --test
 ```
 
@@ -317,11 +323,12 @@ python3 video_looper.py --videos-path /custom/videos/path --log-file /custom/log
 
 ### Service Configuration
 
-The systemd service file (`/etc/systemd/system/video-looper.service`) can be modified to:
-- Change the user/group
+The systemd service file (`/etc/systemd/system/video-looper.service`) runs as the `looper` user. The service file can be modified to:
 - Modify environment variables
 - Adjust restart behavior
 - Change security settings
+
+**Note**: The service is configured to run as the `looper` user. If you need to change this, you must also update the service file and ensure the user exists.
 
 ## Troubleshooting
 
@@ -329,8 +336,9 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
 
 1. **Service won't start**:
    - Check if VLC is installed: `vlc --version`
-   - Verify Python script permissions: `ls -la /home/$USER/video_looper/video_looper.py`
+   - Verify Python script permissions: `ls -la /home/looper/video_looper/video_looper.py`
    - Check service logs: `sudo journalctl -u video-looper -n 50`
+   - Verify looper user exists: `id looper`
 
 2. **No videos playing**:
    - Verify folder naming convention
@@ -343,7 +351,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
    - Verify video file formats are supported
    - Check VLC installation: `sudo apt install --reinstall vlc`
    - Test cvlc directly: `cvlc --intf dummy --help`
-   - Verify service is running as unprivileged user: `ps aux | grep python3`
+   - Verify service is running as looper user: `ps aux | grep python3 | grep looper`
 
 4. **Time synchronization issues**:
    - Check NTP status: `timedatectl status`
@@ -352,8 +360,9 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) can be mod
    - Restart timesyncd: `sudo systemctl restart systemd-timesyncd`
 
 5. **Permission issues**:
-   - Ensure current user owns directories: `sudo chown -R $USER:$USER /home/$USER/videos`
-   - Check log file permissions: `sudo chown $USER:$USER /var/log/video_looper.log`
+   - Ensure looper user owns directories: `sudo chown -R looper:looper /home/looper/videos`
+   - Check log file permissions: `sudo chown looper:looper /var/log/video_looper.log`
+   - Verify looper user exists: `id looper`
 
 6. **Projector control issues**:
    - Check serial port: `python3 video_looper.py --list-ports`
@@ -384,8 +393,8 @@ sudo journalctl -u video-looper -f
 
 Run the script manually for debugging:
 ```bash
-cd /home/$USER/video_looper
-python3 video_looper.py --videos-path /home/$USER/videos
+cd /home/looper/video_looper
+sudo -u looper python3 video_looper.py --videos-path /home/looper/videos
 ```
 
 ## Advanced Usage
@@ -444,10 +453,11 @@ Raspi5-videoLooper/
 
 ## Security Considerations
 
-- The service runs as the `pi` user (not root)
+- The service runs as the `looper` user (not root)
 - Limited file system access through systemd security settings
-- Log files are accessible only to the pi user
+- Log files are accessible only to the looper user
 - No network services exposed
+- The looper user is automatically created during installation if it doesn't exist
 
 ## Support
 

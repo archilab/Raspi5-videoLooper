@@ -137,6 +137,139 @@ class TimeSyncManager:
             self.logger.error(f"RTC setup error: {e}")
             return False
     
+    def set_rtc_from_datetime(self, dt):
+        """
+        Set RTC time from a datetime object
+        Args:
+            dt: datetime object with the time to set
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Format datetime for timedatectl: YYYY-MM-DD HH:MM:SS
+            time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            self.logger.info(f"Setting RTC time to: {time_str}")
+            
+            # Set system time using timedatectl (requires sudo)
+            result = subprocess.run(
+                ['sudo', 'timedatectl', 'set-time', time_str],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                # Sync system time to RTC
+                rtc_result = subprocess.run(
+                    ['sudo', 'hwclock', '--systohc'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if rtc_result.returncode == 0:
+                    self.logger.info("RTC time set successfully")
+                    return True
+                else:
+                    self.logger.warning(f"Failed to sync RTC: {rtc_result.stderr}")
+                    return False
+            else:
+                self.logger.error(f"Failed to set system time: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timeout while setting RTC time")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error setting RTC time: {e}")
+            return False
+    
+    def set_rtc_from_file(self, file_path):
+        """
+        Set RTC time from a file on USB drive
+        Supports multiple time formats:
+        - ISO format: 2024-01-15T14:30:00
+        - Date + Time: 2024-01-15 14:30:00
+        - Timestamp: 1705324200 (Unix timestamp)
+        Args:
+            file_path: Path to the time file
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from pathlib import Path
+            
+            time_file = Path(file_path)
+            
+            if not time_file.exists():
+                self.logger.debug(f"Time file not found: {file_path}")
+                return False
+            
+            # Read time from file
+            with open(time_file, 'r') as f:
+                time_str = f.read().strip()
+            
+            if not time_str:
+                self.logger.warning(f"Time file is empty: {file_path}")
+                return False
+            
+            self.logger.info(f"Reading time from file: {file_path}")
+            self.logger.debug(f"Time string from file: {time_str}")
+            
+            # Try to parse different time formats
+            dt = None
+            
+            # Try ISO format: 2024-01-15T14:30:00 or 2024-01-15T14:30:00.000000
+            try:
+                dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                # Remove timezone info for local time
+                if dt.tzinfo:
+                    dt = dt.replace(tzinfo=None)
+                self.logger.debug("Parsed as ISO format")
+            except ValueError:
+                pass
+            
+            # Try format: YYYY-MM-DD HH:MM:SS
+            if dt is None:
+                try:
+                    dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+                    self.logger.debug("Parsed as date + time format")
+                except ValueError:
+                    pass
+            
+            # Try format: YYYY-MM-DD HH:MM
+            if dt is None:
+                try:
+                    dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
+                    self.logger.debug("Parsed as date + time (no seconds) format")
+                except ValueError:
+                    pass
+            
+            # Try Unix timestamp (integer)
+            if dt is None:
+                try:
+                    timestamp = int(float(time_str))
+                    dt = datetime.fromtimestamp(timestamp)
+                    self.logger.debug("Parsed as Unix timestamp")
+                except (ValueError, OSError):
+                    pass
+            
+            if dt is None:
+                self.logger.error(f"Could not parse time from file. Format: '{time_str}'")
+                self.logger.error("Supported formats: ISO (2024-01-15T14:30:00), Date+Time (2024-01-15 14:30:00), Unix timestamp")
+                return False
+            
+            # Set RTC time
+            return self.set_rtc_from_datetime(dt)
+            
+        except PermissionError:
+            self.logger.error(f"Permission denied reading time file: {file_path}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error reading time file: {e}")
+            return False
+    
     def sync_time(self):
         """Main time synchronization method"""
         self.logger.info("Starting time synchronization...")
@@ -239,6 +372,8 @@ def main():
     parser.add_argument('--test', action='store_true', help='Test time sync')
     parser.add_argument('--status', action='store_true', help='Show time status')
     parser.add_argument('--sync', action='store_true', help='Force time sync')
+    parser.add_argument('--set-rtc-from-file', type=str, metavar='FILE',
+                       help='Set RTC time from a time file')
     
     args = parser.parse_args()
     
@@ -262,6 +397,14 @@ def main():
             print("✓ Time synchronization successful")
         else:
             print("✗ Time synchronization failed")
+    
+    elif args.set_rtc_from_file:
+        print(f"Setting RTC time from file: {args.set_rtc_from_file}")
+        if time_sync.set_rtc_from_file(args.set_rtc_from_file):
+            print("✓ RTC time set successfully")
+        else:
+            print("✗ Failed to set RTC time from file")
+        return
     
     elif args.test:
         print("Testing time synchronization...")

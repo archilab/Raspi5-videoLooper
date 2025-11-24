@@ -17,6 +17,7 @@ import json
 from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 from hdmi_controller import HDMIController
+from usb_sync import USBSync
 
 class VideoLooper:
     def __init__(self, videos_path=None, log_file=None):
@@ -43,6 +44,9 @@ class VideoLooper:
         
         # Initialize HDMI controller
         self.hdmi = HDMIController(log_file)
+        
+        # Initialize USB sync
+        self.usb_sync = USBSync(str(self.videos_path), log_file)
         
         # Signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -414,6 +418,14 @@ class VideoLooper:
         """Main loop"""
         self.logger.info("Starting video looper")
         
+        # USB sync on boot (check for USB drives and sync if found)
+        self.logger.info("Checking for USB drives and syncing if found...")
+        try:
+            self.usb_sync.sync_on_boot()
+        except Exception as e:
+            self.logger.warning(f"USB sync failed: {e}")
+            # Continue even if USB sync fails
+        
         # Initial time synchronization
         self.logger.info("Performing initial time synchronization...")
         if self.time_sync.sync_time():
@@ -492,6 +504,12 @@ def main():
                        help='Stop projector')
     parser.add_argument('--list-ports', action='store_true',
                        help='List available serial ports')
+    parser.add_argument('--usb-sync', action='store_true',
+                       help='Sync videos from USB drive')
+    parser.add_argument('--usb-sync-test', action='store_true',
+                       help='Test USB sync (show what would be synced without copying)')
+    parser.add_argument('--usb-path', default=None,
+                       help='Path to USB drive to sync from (optional, auto-detects if not specified)')
     
     args = parser.parse_args()
     
@@ -566,6 +584,63 @@ def main():
         ports = looper.projector.get_available_ports()
         for port in ports:
             print(f"  {port['device']}: {port['description']} ({port['manufacturer']})")
+        return
+    
+    elif args.usb_sync_test:
+        # Test USB sync (scanning only, no copying)
+        print("Testing USB sync (scanning only, no copying)...")
+        print(f"\nScanning USB drives...")
+        usb_mounts = looper.usb_sync.find_usb_drives()
+        print(f"Found {len(usb_mounts)} potential USB drive(s):")
+        
+        usb_folders_all = {}
+        for mount in usb_mounts:
+            print(f"  - {mount}")
+            valid_folders = looper.usb_sync.get_valid_folders(mount)
+            print(f"    Valid video folders: {len(valid_folders)}")
+            for folder_name in valid_folders.keys():
+                print(f"      - {folder_name}")
+                usb_folders_all[folder_name] = mount
+        
+        print(f"\nLocal video folders in {looper.videos_path}:")
+        local_folders = looper.usb_sync.get_valid_folders(looper.videos_path)
+        print(f"  Found {len(local_folders)} valid folder(s):")
+        for folder_name in local_folders.keys():
+            print(f"    - {folder_name}")
+        
+        if usb_mounts and usb_folders_all:
+            print(f"\nIf synced, would:")
+            for folder_name in usb_folders_all.keys():
+                if folder_name not in local_folders:
+                    print(f"  - Copy folder: {folder_name}")
+                else:
+                    print(f"  - Update folder: {folder_name}")
+            for folder_name in local_folders.keys():
+                if folder_name not in usb_folders_all:
+                    print(f"  - Delete folder: {folder_name}")
+        return
+    
+    elif args.usb_sync:
+        # Manual USB sync
+        print("Syncing from USB drive...")
+        try:
+            if args.usb_path:
+                print(f"Using USB path: {args.usb_path}")
+                success = looper.usb_sync.sync_usb_to_local(Path(args.usb_path))
+                if success:
+                    print("✓ USB sync completed successfully")
+                else:
+                    print("✗ USB sync completed with errors (check logs)")
+            else:
+                success = looper.usb_sync.sync_on_boot()
+                if success:
+                    print("✓ USB sync completed successfully")
+                else:
+                    print("✗ No USB drives with valid video folders found")
+        except Exception as e:
+            print(f"✗ USB sync failed: {e}")
+            import traceback
+            traceback.print_exc()
         return
     
     looper.run()

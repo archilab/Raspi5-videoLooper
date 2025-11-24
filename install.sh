@@ -66,6 +66,11 @@ sudo mkdir -p "$VIDEOS_DIR"
 # Set ownership immediately so we can work with the directories
 sudo chown looper:looper "$INSTALL_DIR"
 sudo chown looper:looper "$VIDEOS_DIR"
+sudo mkdir -p "$INSTALL_DIR"
+sudo mkdir -p "$VIDEOS_DIR"
+# Set ownership immediately so we can work with the directories
+sudo chown looper:looper "$INSTALL_DIR"
+sudo chown looper:looper "$VIDEOS_DIR"
 
 echo -e "${GREEN}Step 4: Copying files...${NC}"
 # Copy the video looper script (force overwrite) - use sudo since directory is owned by looper
@@ -73,11 +78,13 @@ sudo cp -f video_looper.py "$INSTALL_DIR/"
 sudo cp -f time_sync.py "$INSTALL_DIR/"
 sudo cp -f projector_controller.py "$INSTALL_DIR/"
 sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
+sudo cp -f usb_sync.py "$INSTALL_DIR/"
 sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
 sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
+sudo chmod +x "$INSTALL_DIR/usb_sync.py"
 
 echo -e "${GREEN}Step 5: Setting up Python environment...${NC}"
 # Create Python virtual environment as looper user

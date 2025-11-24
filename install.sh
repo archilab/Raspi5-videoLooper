@@ -26,13 +26,72 @@ if [ "$EUID" -eq 0 ]; then
    exit 1
 fi
 
+# Check if admin user exists
+ADMIN_EXISTS=false
+if id -u admin >/dev/null 2>&1; then
+    ADMIN_EXISTS=true
+    echo -e "${GREEN}✓ User 'admin' already exists${NC}"
+else
+    echo -e "${YELLOW}User 'admin' does not exist${NC}"
+fi
+
+# Check if looper user exists
+LOOPER_EXISTS=false
+if id -u looper >/dev/null 2>&1; then
+    LOOPER_EXISTS=true
+    echo -e "${GREEN}✓ User 'looper' already exists${NC}"
+else
+    echo -e "${YELLOW}User 'looper' does not exist${NC}"
+fi
+
+# If looper exists but admin doesn't, create admin and make it sudo user
+if [ "$LOOPER_EXISTS" = true ] && [ "$ADMIN_EXISTS" = false ]; then
+    echo -e "${GREEN}Creating admin user and configuring permissions...${NC}"
+    
+    # Create admin user with sudo privileges
+    sudo useradd -m -s /bin/bash admin
+    sudo usermod -a -G adm,tty,dialout,cdrom,audio,video,plugdev,games,users,input,netdev,gpio,i2c,spi,sudo,looper admin
+    echo -e "${GREEN}✓ User 'admin' created${NC}"
+    
+    # Add admin to sudo group
+    sudo usermod -aG sudo admin
+    echo -e "${GREEN}✓ Added 'admin' to sudo group${NC}"
+    
+    # Remove looper from sudo group (if present)
+    if groups looper | grep -q '\bsudo\b'; then
+        sudo deluser looper sudo
+        echo -e "${GREEN}✓ Removed 'looper' from sudo group${NC}"
+    else
+        echo -e "${GREEN}✓ 'looper' is not in sudo group${NC}"
+    fi
+    
+    # Check for and remove looper from sudoers file (if present)
+    if sudo grep -q "^looper" /etc/sudoers 2>/dev/null || sudo grep -q "^%looper" /etc/sudoers.d/* 2>/dev/null; then
+        echo -e "${YELLOW}Warning: Found 'looper' entries in sudoers files. Manual review recommended.${NC}"
+        echo -e "${YELLOW}Check /etc/sudoers and /etc/sudoers.d/* for 'looper' entries${NC}"
+    fi
+    
+    # Create sudoers.d entry for admin (allow passwordless sudo)
+    echo "admin ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/admin > /dev/null
+    sudo chmod 0440 /etc/sudoers.d/admin
+    echo -e "${GREEN}✓ Configured passwordless sudo for 'admin'${NC}"
+    
+    echo -e "${GREEN}✓ Admin user setup complete. Admin is now the sudo user.${NC}"
+fi
+
 # Check if looper user exists, create if not
-if ! id -u looper >/dev/null 2>&1; then
+if [ "$LOOPER_EXISTS" = false ]; then
     echo -e "${GREEN}Creating looper user...${NC}"
     sudo useradd -m -s /bin/bash looper
     echo -e "${GREEN}✓ User 'looper' created${NC}"
-else
-    echo -e "${GREEN}✓ User 'looper' already exists${NC}"
+    LOOPER_EXISTS=true
+fi
+
+# Ensure looper is NOT in sudo group
+if groups looper | grep -q '\bsudo\b'; then
+    echo -e "${YELLOW}Removing 'looper' from sudo group...${NC}"
+    sudo deluser looper sudo
+    echo -e "${GREEN}✓ Removed 'looper' from sudo group${NC}"
 fi
 
 # Check if running on Raspberry Pi
@@ -58,14 +117,11 @@ sudo apt install -y \
     ffmpeg \
     python3-requests \
     python3-serial \
-    cec-utils
+    cec-utils 
+
+sudo apt-get install -y pmount
 
 echo -e "${GREEN}Step 3: Creating directories...${NC}"
-sudo mkdir -p "$INSTALL_DIR"
-sudo mkdir -p "$VIDEOS_DIR"
-# Set ownership immediately so we can work with the directories
-sudo chown looper:looper "$INSTALL_DIR"
-sudo chown looper:looper "$VIDEOS_DIR"
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p "$VIDEOS_DIR"
 # Set ownership immediately so we can work with the directories

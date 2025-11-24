@@ -121,14 +121,81 @@ sudo apt install -y \
 
 sudo apt-get install -y pmount
 
-echo -e "${GREEN}Step 3: Creating directories...${NC}"
+echo -e "${GREEN}Step 3: Configuring USB automount...${NC}"
+
+# Create mount script /usr/local/bin/cpmount
+echo -e "${GREEN}Creating USB mount script...${NC}"
+sudo tee /usr/local/bin/cpmount > /dev/null <<'CPMOUNT'
+#!/bin/bash
+if mountpoint -q /media/usb1
+then
+   if mountpoint -q /media/usb2
+   then
+      if mountpoint -q /media/usb3
+      then
+         if mountpoint -q /media/usb4
+         then
+             echo "No mountpoints available!"
+             #You can add more if you need
+         else
+             /usr/bin/pmount --umask 000 --noatime -w --sync $1 usb4
+         fi
+      else
+         /usr/bin/pmount --umask 000 --noatime -w --sync $1 usb3
+      fi
+   else
+      /usr/bin/pmount --umask 000 --noatime -w --sync $1 usb2
+   fi
+else
+   /usr/bin/pmount --umask 000 --noatime -w --sync $1 usb1
+fi
+CPMOUNT
+
+# Make mount script executable
+sudo chmod +x /usr/local/bin/cpmount
+echo -e "${GREEN}✓ USB mount script created${NC}"
+
+# Create udev rule
+echo -e "${GREEN}Creating udev rule for USB automount...${NC}"
+sudo tee /etc/udev/rules.d/usbstick.rules > /dev/null <<'UDEV'
+ACTION=="add", KERNEL=="sd[a-z][0-9]", TAG+="systemd", ENV{SYSTEMD_WANTS}="usbstick-handler@%k"
+UDEV
+
+echo -e "${GREEN}✓ Udev rule created${NC}"
+
+# Create systemd service
+echo -e "${GREEN}Creating systemd service for USB automount...${NC}"
+sudo tee /lib/systemd/system/usbstick-handler@.service > /dev/null <<'SERVICE'
+[Unit]
+Description=Mount USB sticks
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/cpmount /dev/%I
+ExecStop=/usr/bin/pumount /dev/%I
+SERVICE
+
+echo -e "${GREEN}✓ Systemd service created${NC}"
+
+# Reload systemd and udev
+echo -e "${GREEN}Reloading systemd and udev...${NC}"
+sudo systemctl daemon-reload
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+echo -e "${GREEN}✓ USB automount configured${NC}"
+
+echo -e "${GREEN}Step 4: Creating directories...${NC}"
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p "$VIDEOS_DIR"
 # Set ownership immediately so we can work with the directories
 sudo chown looper:looper "$INSTALL_DIR"
 sudo chown looper:looper "$VIDEOS_DIR"
 
-echo -e "${GREEN}Step 4: Copying files...${NC}"
+echo -e "${GREEN}Step 5: Copying files...${NC}"
 # Copy the video looper script (force overwrite) - use sudo since directory is owned by looper
 sudo cp -f video_looper.py "$INSTALL_DIR/"
 sudo cp -f time_sync.py "$INSTALL_DIR/"
@@ -142,7 +209,7 @@ sudo chmod +x "$INSTALL_DIR/projector_controller.py"
 sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 sudo chmod +x "$INSTALL_DIR/usb_sync.py"
 
-echo -e "${GREEN}Step 5: Setting up Python environment...${NC}"
+echo -e "${GREEN}Step 6: Setting up Python environment...${NC}"
 # Create Python virtual environment as looper user
 sudo -u looper bash -c "cd '$INSTALL_DIR' && python3 -m venv venv"
 
@@ -156,7 +223,7 @@ else
     pip3 install --upgrade pip
 fi
 
-echo -e "${GREEN}Step 6: Configuring time synchronization...${NC}"
+echo -e "${GREEN}Step 7: Configuring time synchronization...${NC}"
 # Enable systemd-timesyncd for automatic NTP sync (already included in Raspberry Pi OS)
 sudo systemctl enable systemd-timesyncd
 sudo systemctl start systemd-timesyncd
@@ -175,7 +242,7 @@ sudo systemctl restart systemd-timesyncd
 
 echo -e "${GREEN}✓ Time synchronization configured${NC}"
 
-echo -e "${GREEN}Step 7: Configuring systemd service...${NC}"
+echo -e "${GREEN}Step 8: Configuring systemd service...${NC}"
 
 # Check if service is already running and stop it before updating
 SERVICE_WAS_RUNNING=false
@@ -222,25 +289,21 @@ sudo systemctl daemon-reload
 echo -e "${GREEN}Enabling service for auto-start on boot...${NC}"
 sudo systemctl enable video-looper
 
-# Restart or start the service
-if [ "$SERVICE_WAS_RUNNING" = true ]; then
-    echo -e "${GREEN}Restarting service with new configuration...${NC}"
-    sudo systemctl start video-looper
-    
-    # Wait a moment and check if it started successfully
-    sleep 2
-    if systemctl is-active --quiet video-looper; then
-        echo -e "${GREEN}✓ Service restarted successfully${NC}"
-    else
-        echo -e "${YELLOW}⚠ Service may not have started correctly. Check status with: sudo systemctl status video-looper${NC}"
-    fi
+# Always start the service after enabling
+echo -e "${GREEN}Starting service...${NC}"
+sudo systemctl start video-looper
+
+# Wait a moment and check if it started successfully
+sleep 3
+if systemctl is-active --quiet video-looper 2>/dev/null; then
+    echo -e "${GREEN}✓ Service started successfully${NC}"
 else
-    echo -e "${GREEN}Service is enabled and ready.${NC}"
-    echo -e "${YELLOW}  Start it manually with: sudo systemctl start video-looper${NC}"
-    echo -e "${YELLOW}  Or it will start automatically on the next reboot.${NC}"
+    echo -e "${YELLOW}⚠ Service may not have started correctly. Checking status...${NC}"
+    sudo systemctl status video-looper --no-pager -l || true
+    echo -e "${YELLOW}Check logs with: sudo journalctl -u video-looper -n 50${NC}"
 fi
 
-echo -e "${GREEN}Step 8: Setting up permissions...${NC}"
+echo -e "${GREEN}Step 9: Setting up permissions...${NC}"
 # Ensure looper user owns the directories
 sudo chown -R looper:looper "$INSTALL_DIR"
 sudo chown -R looper:looper "$VIDEOS_DIR"
@@ -250,7 +313,17 @@ sudo mkdir -p /var/log
 sudo touch /var/log/video_looper.log
 sudo chown looper:looper /var/log/video_looper.log
 
-echo -e "${GREEN}Step 9: Testing installation...${NC}"
+# Ensure XDG_RUNTIME_DIR exists for looper user (required for systemd user services)
+LOOPER_USER_ID=$(id -u looper 2>/dev/null || echo "1000")
+if [ ! -d "/run/user/$LOOPER_USER_ID" ]; then
+    echo -e "${GREEN}Creating runtime directory for looper user...${NC}"
+    sudo mkdir -p "/run/user/$LOOPER_USER_ID"
+    sudo chown looper:looper "/run/user/$LOOPER_USER_ID"
+    sudo chmod 0700 "/run/user/$LOOPER_USER_ID"
+    echo -e "${GREEN}✓ Runtime directory created${NC}"
+fi
+
+echo -e "${GREEN}Step 10: Testing installation...${NC}"
 # Test the script as looper user
 sudo -u looper bash -c "cd '$INSTALL_DIR' && python3 video_looper.py --test"
 
@@ -261,7 +334,7 @@ else
     exit 1
 fi
 
-echo -e "${GREEN}Step 10: Creating example folder structure...${NC}"
+echo -e "${GREEN}Step 11: Creating example folder structure...${NC}"
 # Create example folders with different schedules
 mkdir -p "$VIDEOS_DIR/2024-01-01_to_2024-01-31_0900_to_1800"
 mkdir -p "$VIDEOS_DIR/2024-02-01_to_2024-02-29_0800_to_2000"

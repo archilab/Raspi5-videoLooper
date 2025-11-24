@@ -1,7 +1,7 @@
 [Unit]
 Description=Raspberry Pi Video Looper
-After=network.target graphical-session.target
-Wants=graphical-session.target
+After=network.target local-fs.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -21,4 +21,4 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=QT_QPA_PLATFORM=xcb
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 import json
 import re
+import subprocess
 
 class ProjectorController:
     def __init__(self, log_file="/var/log/video_looper.log"):
@@ -65,17 +66,55 @@ class ProjectorController:
             return False
     
     def get_default_config(self):
-        """Get default projector configuration"""
+        """Get default projector configuration (Optoma defaults)"""
         return {
             'serial_port': '/dev/ttyUSB0',
             'baud_rate': 9600,
             'timeout': 5,
-            'start_command': 'PWR ON',
-            'stop_command': 'PWR OFF',
+            'start_command': '~0000 1',
+            'stop_command': '~0000 0',
             'start_delay': 0,
             'stop_delay': 0,
-            'enable_projector': False
+            'enable_projector': False,
+            'configure_stty': True  # Apply stty configuration for Optoma projectors
         }
+    
+    def configure_serial_port(self, port):
+        """Configure serial port using stty (for Optoma projectors)"""
+        if not self.config.get('configure_stty', True):
+            return True
+        
+        try:
+            baud_rate = int(self.config.get('baud_rate', 9600))
+            # Apply stty configuration: 9600 cs8 -cstopb -parenb -ixon -ixoff -crtscts
+            stty_cmd = [
+                'stty', '-F', port,
+                str(baud_rate),
+                'cs8',
+                '-cstopb',
+                '-parenb',
+                '-ixon',
+                '-ixoff',
+                '-crtscts'
+            ]
+            
+            result = subprocess.run(
+                stty_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                self.logger.debug(f"Serial port {port} configured with stty")
+                return True
+            else:
+                self.logger.warning(f"stty configuration failed: {result.stderr.decode()}")
+                return False
+                
+        except Exception as e:
+            self.logger.warning(f"Error configuring serial port with stty: {e}")
+            return False
     
     def connect(self):
         """Connect to projector via serial"""
@@ -88,13 +127,18 @@ class ProjectorController:
             baud_rate = int(self.config.get('baud_rate', 9600))
             timeout = int(self.config.get('timeout', 5))
             
+            # Configure serial port with stty if enabled
+            self.configure_serial_port(port)
+            
             self.serial_connection = serial.Serial(
                 port=port,
                 baudrate=baud_rate,
                 timeout=timeout,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE
+                stopbits=serial.STOPBITS_ONE,
+                xonxoff=False,  # -ixon -ixoff
+                rtscts=False    # -crtscts
             )
             
             self.is_connected = True
@@ -127,12 +171,13 @@ class ProjectorController:
             return False
         
         try:
-            # Add carriage return and line feed if not present
-            if not command.endswith('\r\n'):
-                command = command + '\r\n'
+            # For Optoma: commands end with \r (carriage return), not \r\n
+            # Add carriage return if not present
+            if not command.endswith('\r'):
+                command = command + '\r'
             
             self.serial_connection.write(command.encode())
-            self.logger.info(f"Sent command to projector: {command.strip()}")
+            self.logger.info(f"Sent command to projector: {repr(command)}")
             
             # Wait for response if configured
             if self.config.get('wait_for_response', False):
@@ -158,7 +203,7 @@ class ProjectorController:
             self.logger.info(f"Waiting {start_delay} seconds before starting projector...")
             time.sleep(start_delay)
         
-        start_command = self.config.get('start_command', 'PWR ON')
+        start_command = self.config.get('start_command', '~0000 1')
         return self.send_command(start_command)
     
     def stop_projector(self):
@@ -172,7 +217,7 @@ class ProjectorController:
             self.logger.info(f"Waiting {stop_delay} seconds before stopping projector...")
             time.sleep(stop_delay)
         
-        stop_command = self.config.get('stop_command', 'PWR OFF')
+        stop_command = self.config.get('stop_command', '~0000 0')
         return self.send_command(stop_command)
     
     def test_connection(self):

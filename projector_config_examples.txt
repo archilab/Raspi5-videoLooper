@@ -66,10 +66,10 @@ wait_for_response=false
 # stop_command=PWR OFF
 # status_command=PWR?
 
-# Optoma projectors
-# start_command=PWR ON
-# stop_command=PWR OFF
-# status_command=PWR?
+# Optoma projectors (default configuration)
+# start_command=~0000 1
+# stop_command=~0000 0
+# configure_stty=true  # Uses stty to configure serial port (recommended for Optoma)
 
 # ===========================================
 # Configuration Options Explained

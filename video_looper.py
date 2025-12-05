@@ -18,14 +18,19 @@ from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 from hdmi_controller import HDMIController
 from usb_sync import USBSync
+from constants import (
+    DEFAULT_VIDEOS_PATH, DEFAULT_LOG_FILE, VIDEO_EXTENSIONS,
+    PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT,
+    CHECK_INTERVAL, HDMI_WAKE_DELAY
+)
 
 class VideoLooper:
     def __init__(self, videos_path=None, log_file=None):
         # Use fixed paths for looper user
         if videos_path is None:
-            videos_path = "/home/looper/videos"
+            videos_path = DEFAULT_VIDEOS_PATH
         if log_file is None:
-            log_file = "/var/log/video_looper.log"
+            log_file = DEFAULT_LOG_FILE
             
         self.videos_path = Path(videos_path)
         self.log_file = log_file
@@ -77,17 +82,16 @@ class VideoLooper:
         Expected format: YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
         Example: 2024-01-01_to_2024-01-31_0900_to_1800
         """
-        pattern = r'(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(\d{4})_to_(\d{4})'
-        match = re.match(pattern, folder_name)
+        match = re.match(FOLDER_NAME_PATTERN, folder_name)
         
         if not match:
             return None
         
         try:
-            start_date = datetime.strptime(match.group(1), '%Y-%m-%d').date()
-            end_date = datetime.strptime(match.group(2), '%Y-%m-%d').date()
-            start_time = datetime.strptime(match.group(3), '%H%M').time()
-            end_time = datetime.strptime(match.group(4), '%H%M').time()
+            start_date = datetime.strptime(match.group(1), DATE_FORMAT).date()
+            end_date = datetime.strptime(match.group(2), DATE_FORMAT).date()
+            start_time = datetime.strptime(match.group(3), TIME_FORMAT).time()
+            end_time = datetime.strptime(match.group(4), TIME_FORMAT).time()
             
             return {
                 'start_date': start_date,
@@ -125,20 +129,15 @@ class VideoLooper:
     
     def get_video_files(self, folder_path):
         """Get all video files from a folder"""
-        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
-        video_files = []
-        
-        for file_path in folder_path.iterdir():
-            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
-                video_files.append(file_path)
-        
+        video_files = [
+            f for f in folder_path.iterdir()
+            if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+        ]
         return sorted(video_files)
     
     def has_projector_config(self, folder_path):
         """Check if folder has projector configuration file"""
-        config_files = ['projector.txt', 'projector.conf', 'config.txt']
-        
-        for config_file in config_files:
+        for config_file in PROJECTOR_CONFIG_FILES:
             config_path = folder_path / config_file
             if config_path.exists():
                 return True
@@ -147,9 +146,7 @@ class VideoLooper:
     
     def load_projector_config(self, folder_path):
         """Load projector configuration from folder"""
-        config_files = ['projector.txt', 'projector.conf', 'config.txt']
-        
-        for config_file in config_files:
+        for config_file in PROJECTOR_CONFIG_FILES:
             config_path = folder_path / config_file
             if config_path.exists():
                 return self.projector.load_config_from_file(str(config_path))
@@ -202,7 +199,7 @@ class VideoLooper:
         
         if self.hdmi.is_available():
             if self.hdmi.wake_hdmi():
-                time.sleep(2)
+                time.sleep(HDMI_WAKE_DELAY)
         
         if self.has_projector_config(folder_path):
             self.load_projector_config(folder_path)
@@ -361,7 +358,7 @@ class VideoLooper:
                         if hdmi_state == 1:
                             self.hdmi.standby_hdmi()
                 
-                time.sleep(30)
+                time.sleep(CHECK_INTERVAL)
                 
             except KeyboardInterrupt:
                 break

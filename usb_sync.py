@@ -12,13 +12,17 @@ from pathlib import Path
 import re
 from datetime import datetime
 import subprocess
+from constants import (
+    VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN,
+    DATE_FORMAT, TIME_FORMAT, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH,
+    DEFAULT_LOG_FILE
+)
 
 class USBSync:
-    def __init__(self, local_videos_path="/home/looper/videos", log_file="/var/log/video_looper.log"):
+    def __init__(self, local_videos_path=None, log_file=None):
         self.logger = logging.getLogger(__name__)
-        self.local_videos_path = Path(local_videos_path)
-        self.log_file = log_file
-        self.video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
+        self.local_videos_path = Path(local_videos_path or DEFAULT_VIDEOS_PATH)
+        self.log_file = log_file or DEFAULT_LOG_FILE
         
     def find_usb_drives(self):
         """
@@ -31,12 +35,7 @@ class USBSync:
         try:
             # Priority 1: Check usbmount mount points first (/media/usb0, /media/usb1, etc.)
             # These are the standard locations for automatically mounted USB drives
-            usbmount_paths = [
-                Path('/media/usb0'),
-                Path('/media/usb1'),
-                Path('/media/usb2'),
-                Path('/media/usb3'),
-            ]
+            usbmount_paths = [Path(p) for p in USB_MOUNT_POINTS]
             
             for usb_path in usbmount_paths:
                 if usb_path.exists() and usb_path.is_dir():
@@ -136,25 +135,24 @@ class USBSync:
             return False
         
         # Check folder name pattern
-        pattern = r'(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(\d{4})_to_(\d{4})'
-        match = re.match(pattern, folder_path.name)
+        match = re.match(FOLDER_NAME_PATTERN, folder_path.name)
         
         if not match:
             return False
         
         # Validate date format
         try:
-            datetime.strptime(match.group(1), '%Y-%m-%d').date()
-            datetime.strptime(match.group(2), '%Y-%m-%d').date()
-            datetime.strptime(match.group(3), '%H%M').time()
-            datetime.strptime(match.group(4), '%H%M').time()
+            datetime.strptime(match.group(1), DATE_FORMAT).date()
+            datetime.strptime(match.group(2), DATE_FORMAT).date()
+            datetime.strptime(match.group(3), TIME_FORMAT).time()
+            datetime.strptime(match.group(4), TIME_FORMAT).time()
         except ValueError:
             return False
         
         # Check if folder contains at least one video file
         try:
             for file_path in folder_path.iterdir():
-                if file_path.is_file() and file_path.suffix.lower() in self.video_extensions:
+                if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
                     return True
         except (PermissionError, OSError):
             return False
@@ -220,7 +218,7 @@ class USBSync:
         
         try:
             for item in folder_path.iterdir():
-                if item.is_file() and item.suffix.lower() in self.video_extensions:
+                if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
                     video_files.add(item.name.lower())
         except (PermissionError, OSError) as e:
             self.logger.warning(f"Could not list video files in {folder_path}: {e}")
@@ -330,8 +328,7 @@ class USBSync:
                 self.logger.error(error_msg)
         
         # Copy projector config files if they exist
-        config_files = ['projector.txt', 'projector.conf', 'config.txt']
-        for config_file in config_files:
+        for config_file in PROJECTOR_CONFIG_FILES:
             usb_config = usb_folder_path / config_file
             local_config = local_folder_path / config_file
             
@@ -361,8 +358,8 @@ class USBSync:
             if filename not in usb_files:
                 try:
                     # Only delete video files and config files, not other files
-                    if (local_file.suffix.lower() in self.video_extensions or 
-                        local_file.name in config_files):
+                    if (local_file.suffix.lower() in VIDEO_EXTENSIONS or
+                        local_file.name in PROJECTOR_CONFIG_FILES):
                         local_file.unlink()
                 except Exception as e:
                     error_msg = f"Failed to delete file {filename}: {e}"

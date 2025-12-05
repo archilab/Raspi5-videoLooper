@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 import json
 import subprocess
+from constants import (
+    DEFAULT_SERIAL_PORT, DEFAULT_BAUD_RATE, DEFAULT_SERIAL_TIMEOUT,
+    DEFAULT_START_COMMAND, DEFAULT_STOP_COMMAND
+)
 
 class ProjectorController:
     def __init__(self, log_file="/var/log/video_looper.log"):
@@ -64,11 +68,11 @@ class ProjectorController:
     def get_default_config(self):
         """Get default projector configuration (Optoma defaults)"""
         return {
-            'serial_port': '/dev/ttyUSB0',
-            'baud_rate': 9600,
-            'timeout': 5,
-            'start_command': '~0000 1',
-            'stop_command': '~0000 0',
+            'serial_port': DEFAULT_SERIAL_PORT,
+            'baud_rate': DEFAULT_BAUD_RATE,
+            'timeout': DEFAULT_SERIAL_TIMEOUT,
+            'start_command': DEFAULT_START_COMMAND,
+            'stop_command': DEFAULT_STOP_COMMAND,
             'start_delay': 0,
             'stop_delay': 0,
             'enable_projector': False,
@@ -81,7 +85,7 @@ class ProjectorController:
             return True
         
         try:
-            baud_rate = int(self.config.get('baud_rate', 9600))
+            baud_rate = int(self.config.get('baud_rate', DEFAULT_BAUD_RATE))
             # Apply stty configuration: 9600 cs8 -cstopb -parenb -ixon -ixoff -crtscts
             stty_cmd = [
                 'stty', '-F', port,
@@ -112,9 +116,9 @@ class ProjectorController:
             return True
         
         try:
-            port = self.config.get('serial_port', '/dev/ttyUSB0')
-            baud_rate = int(self.config.get('baud_rate', 9600))
-            timeout = int(self.config.get('timeout', 5))
+            port = self.config.get('serial_port', DEFAULT_SERIAL_PORT)
+            baud_rate = int(self.config.get('baud_rate', DEFAULT_BAUD_RATE))
+            timeout = int(self.config.get('timeout', DEFAULT_SERIAL_TIMEOUT))
             
             # Configure serial port with stty if enabled
             self.configure_serial_port(port)
@@ -177,7 +181,7 @@ class ProjectorController:
         if start_delay > 0:
             time.sleep(start_delay)
         
-        start_command = self.config.get('start_command', '~0000 1')
+        start_command = self.config.get('start_command', DEFAULT_START_COMMAND)
         return self.send_command(start_command)
     
     def stop_projector(self):
@@ -189,7 +193,7 @@ class ProjectorController:
         if stop_delay > 0:
             time.sleep(stop_delay)
         
-        stop_command = self.config.get('stop_command', '~0000 0')
+        stop_command = self.config.get('stop_command', DEFAULT_STOP_COMMAND)
         return self.send_command(stop_command)
     
     def get_available_ports(self):

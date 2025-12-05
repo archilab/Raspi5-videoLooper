@@ -48,12 +48,7 @@ class TimeSyncManager:
             
             if result.returncode == 0:
                 # Check if NTP is already enabled
-                if 'NTP service: active' in result.stdout or 'NTP synchronized: yes' in result.stdout:
-                    self.logger.info("NTP synchronization is active")
-                    return True
-                else:
-                    self.logger.info("NTP synchronization is configured but not active (this is normal)")
-                    return True
+                return True
             else:
                 self.logger.warning(f"Could not check NTP status: {result.stderr}")
                 return False
@@ -74,10 +69,7 @@ class TimeSyncManager:
             # Check if ntpdate is available
             import shutil
             if not shutil.which('ntpdate'):
-                self.logger.info("ntpdate not available, using systemd-timesyncd only")
                 return False
-            
-            self.logger.info("ntpdate found, attempting manual sync...")
             ntp_servers = [
                 'pool.ntp.org',
                 'time.google.com',
@@ -95,7 +87,6 @@ class TimeSyncManager:
                     )
                     
                     if result.returncode == 0:
-                        self.logger.info(f"Successfully synced with NTP server: {server}")
                         return True
                         
                 except subprocess.TimeoutExpired:
@@ -123,12 +114,7 @@ class TimeSyncManager:
             
             if result.returncode == 0:
                 # Check if system time is managed by RTC
-                if 'RTC' in result.stdout:
-                    self.logger.info("RTC is available as time source")
-                    return True
-                else:
-                    self.logger.info("RTC check completed")
-                    return True
+                return True
             else:
                 self.logger.warning("RTC not available")
                 return False
@@ -149,8 +135,6 @@ class TimeSyncManager:
             # Format datetime for timedatectl: YYYY-MM-DD HH:MM:SS
             time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
             
-            self.logger.info(f"Setting RTC time to: {time_str}")
-            
             # Set system time using timedatectl (requires sudo)
             result = subprocess.run(
                 ['sudo', 'timedatectl', 'set-time', time_str],
@@ -169,7 +153,6 @@ class TimeSyncManager:
                 )
                 
                 if rtc_result.returncode == 0:
-                    self.logger.info("RTC time set successfully")
                     return True
                 else:
                     self.logger.warning(f"Failed to sync RTC: {rtc_result.stderr}")
@@ -203,19 +186,13 @@ class TimeSyncManager:
             time_file = Path(file_path)
             
             if not time_file.exists():
-                self.logger.debug(f"Time file not found: {file_path}")
                 return False
             
-            # Read time from file
             with open(time_file, 'r') as f:
                 time_str = f.read().strip()
             
             if not time_str:
-                self.logger.warning(f"Time file is empty: {file_path}")
                 return False
-            
-            self.logger.info(f"Reading time from file: {file_path}")
-            self.logger.debug(f"Time string from file: {time_str}")
             
             # Try to parse different time formats
             dt = None
@@ -223,35 +200,27 @@ class TimeSyncManager:
             # Try ISO format: 2024-01-15T14:30:00 or 2024-01-15T14:30:00.000000
             try:
                 dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
-                # Remove timezone info for local time
                 if dt.tzinfo:
                     dt = dt.replace(tzinfo=None)
-                self.logger.debug("Parsed as ISO format")
             except ValueError:
                 pass
             
-            # Try format: YYYY-MM-DD HH:MM:SS
             if dt is None:
                 try:
                     dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
-                    self.logger.debug("Parsed as date + time format")
                 except ValueError:
                     pass
             
-            # Try format: YYYY-MM-DD HH:MM
             if dt is None:
                 try:
                     dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
-                    self.logger.debug("Parsed as date + time (no seconds) format")
                 except ValueError:
                     pass
             
-            # Try Unix timestamp (integer)
             if dt is None:
                 try:
                     timestamp = int(float(time_str))
                     dt = datetime.fromtimestamp(timestamp)
-                    self.logger.debug("Parsed as Unix timestamp")
                 except (ValueError, OSError):
                     pass
             
@@ -272,35 +241,15 @@ class TimeSyncManager:
     
     def sync_time(self):
         """Main time synchronization method"""
-        self.logger.info("Starting time synchronization...")
-        
-        # Check internet connectivity
         if self.check_internet_connection():
-            self.logger.info("Internet connection available, attempting NTP sync")
-            
-            # Try systemd-timesyncd first
-            if self.sync_with_ntp():
+            if self.sync_with_ntp() or self.sync_with_ntpdate():
                 self.last_sync = datetime.now()
                 return True
-            
-            # Fallback to ntpdate
-            if self.sync_with_ntpdate():
-                self.last_sync = datetime.now()
-                return True
-            
-            self.logger.warning("NTP synchronization failed, falling back to RTC")
         
-        else:
-            self.logger.info("No internet connection, using RTC")
-        
-        # Use RTC as fallback - just verify availability, don't try to sync
         if self.setup_rtc():
-            self.logger.info("RTC is available, systemd-timesyncd will handle syncing")
             self.last_sync = datetime.now()
             return True
         
-        # If we reach here, time sync failed but that's OK - systemd-timesyncd handles it
-        self.logger.info("Time synchronization verification complete")
         return True
     
     def start_background_sync(self):
@@ -310,7 +259,6 @@ class TimeSyncManager:
         
         self.sync_thread = threading.Thread(target=self._background_sync_loop, daemon=True)
         self.sync_thread.start()
-        self.logger.info("Background time synchronization started")
     
     def _background_sync_loop(self):
         """Background synchronization loop"""
@@ -327,7 +275,6 @@ class TimeSyncManager:
         self.running = False
         if self.sync_thread:
             self.sync_thread.join(timeout=5)
-        self.logger.info("Background time synchronization stopped")
     
     def get_time_status(self):
         """Get current time synchronization status"""
@@ -364,61 +311,3 @@ class TimeSyncManager:
         
         return status
 
-def main():
-    """Test the time synchronization module"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Time Synchronization Manager')
-    parser.add_argument('--test', action='store_true', help='Test time sync')
-    parser.add_argument('--status', action='store_true', help='Show time status')
-    parser.add_argument('--sync', action='store_true', help='Force time sync')
-    parser.add_argument('--set-rtc-from-file', type=str, metavar='FILE',
-                       help='Set RTC time from a time file')
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    
-    time_sync = TimeSyncManager()
-    
-    if args.status:
-        status = time_sync.get_time_status()
-        print("Time Synchronization Status:")
-        for key, value in status.items():
-            print(f"  {key}: {value}")
-    
-    elif args.sync:
-        print("Forcing time synchronization...")
-        if time_sync.sync_time():
-            print("✓ Time synchronization successful")
-        else:
-            print("✗ Time synchronization failed")
-    
-    elif args.set_rtc_from_file:
-        print(f"Setting RTC time from file: {args.set_rtc_from_file}")
-        if time_sync.set_rtc_from_file(args.set_rtc_from_file):
-            print("✓ RTC time set successfully")
-        else:
-            print("✗ Failed to set RTC time from file")
-        return
-    
-    elif args.test:
-        print("Testing time synchronization...")
-        print(f"Internet available: {time_sync.check_internet_connection()}")
-        print(f"RTC available: {time_sync.setup_rtc()}")
-        
-        if time_sync.sync_time():
-            print("✓ Time sync test successful")
-        else:
-            print("✗ Time sync test failed")
-    
-    else:
-        print("Time Synchronization Manager")
-        print("Use --help for available options")
-
-if __name__ == '__main__':
-    main()

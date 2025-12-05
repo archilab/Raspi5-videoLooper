@@ -44,9 +44,8 @@ class USBSync:
                         # Check if it's actually mounted
                         if os.path.ismount(usb_path):
                             usb_mounts.append(usb_path)
-                            self.logger.debug(f"Found usbmount USB drive: {usb_path}")
-                    except (PermissionError, OSError) as e:
-                        self.logger.debug(f"Could not check mount status for {usb_path}: {e}")
+                    except (PermissionError, OSError):
+                        pass
             
             # Priority 2: Check other common USB mount locations
             # /media/<user>/ - user-mounted USB drives
@@ -71,9 +70,8 @@ class USBSync:
                             
                             if item.is_dir() and os.path.ismount(item):
                                 usb_mounts.append(item)
-                                self.logger.debug(f"Found potential USB mount: {item}")
-                    except (PermissionError, OSError) as e:
-                        self.logger.debug(f"Could not access {base_path}: {e}")
+                    except (PermissionError, OSError):
+                        pass
             
             # Priority 3: Also check /proc/mounts for mounted USB devices
             # This catches any other mount points we might have missed
@@ -105,9 +103,8 @@ class USBSync:
                                     
                                     if not is_usbmount:
                                         usb_mounts.append(mount_path)
-                                        self.logger.debug(f"Found USB mount from /proc/mounts: {mount_path}")
-            except Exception as e:
-                self.logger.debug(f"Error reading /proc/mounts: {e}")
+            except Exception:
+                pass
             
         except Exception as e:
             self.logger.error(f"Error finding USB drives: {e}")
@@ -159,8 +156,7 @@ class USBSync:
             for file_path in folder_path.iterdir():
                 if file_path.is_file() and file_path.suffix.lower() in self.video_extensions:
                     return True
-        except (PermissionError, OSError) as e:
-            self.logger.debug(f"Could not check files in {folder_path}: {e}")
+        except (PermissionError, OSError):
             return False
         
         return False
@@ -182,7 +178,6 @@ class USBSync:
             for item in root_path.iterdir():
                 if item.is_dir() and self.is_valid_video_folder(item):
                     valid_folders[item.name] = item
-                    self.logger.debug(f"Found valid video folder: {item.name}")
         except (PermissionError, OSError) as e:
             self.logger.warning(f"Could not access {root_path}: {e}")
         
@@ -268,7 +263,6 @@ class USBSync:
         # Check each local folder
         for folder_name, local_folder_path in local_folders.items():
             if self.folders_have_same_video_files(usb_folder_path, local_folder_path):
-                self.logger.info(f"Found local folder '{folder_name}' with same video files as USB folder")
                 return (folder_name, local_folder_path)
         
         return (None, None)
@@ -307,37 +301,29 @@ class USBSync:
                 should_copy = False
                 if not local_file.exists():
                     should_copy = True
-                    self.logger.debug(f"File missing locally: {filename}")
                 else:
-                    # Check if USB file is newer or different size
                     usb_stat = usb_file.stat()
                     local_stat = local_file.stat()
-                    
                     if (usb_stat.st_mtime > local_stat.st_mtime or 
                         usb_stat.st_size != local_stat.st_size):
                         should_copy = True
-                        self.logger.debug(f"File needs update: {filename}")
                 
                 if should_copy:
                     shutil.copy2(usb_file, local_file)
-                    # Set proper ownership (looper user)
                     try:
                         import pwd
                         looper_user = pwd.getpwnam('looper')
                         os.chown(local_file, looper_user.pw_uid, looper_user.pw_gid)
                     except (KeyError, ImportError, PermissionError):
-                        # Fallback: try common user ID
                         try:
                             os.chown(local_file, 1000, 1000)
                         except Exception:
-                            pass  # Ignore permission errors if we can't set ownership
+                            pass
                     
                     if filename in local_files:
                         updated_count += 1
-                        self.logger.info(f"Updated file: {filename}")
                     else:
                         copied_count += 1
-                        self.logger.info(f"Copied file: {filename}")
             except Exception as e:
                 error_msg = f"Failed to copy {filename}: {e}"
                 errors.append(error_msg)
@@ -361,16 +347,14 @@ class USBSync:
                             os.chown(local_config, 1000, 1000)
                         except Exception:
                             pass
-                    self.logger.info(f"Copied config file: {config_file}")
-                except Exception as e:
-                    self.logger.warning(f"Could not copy config file {config_file}: {e}")
+                    pass
+                except Exception:
+                    pass
             elif local_config.exists():
-                # Delete config files that are not on USB
                 try:
                     local_config.unlink()
-                    self.logger.info(f"Deleted config file not on USB: {config_file}")
-                except Exception as e:
-                    self.logger.warning(f"Could not delete config file {config_file}: {e}")
+                except Exception:
+                    pass
         
         # Delete local files that are not on USB
         for filename, local_file in local_files.items():
@@ -380,7 +364,6 @@ class USBSync:
                     if (local_file.suffix.lower() in self.video_extensions or 
                         local_file.name in config_files):
                         local_file.unlink()
-                        self.logger.info(f"Deleted file not on USB: {filename}")
                 except Exception as e:
                     error_msg = f"Failed to delete file {filename}: {e}"
                     errors.append(error_msg)
@@ -396,20 +379,11 @@ class USBSync:
         Returns:
             bool: True if sync was successful, False otherwise
         """
-        self.logger.info(f"Starting USB sync from {usb_root_path}")
-        
-        # Get valid folders from USB
         usb_folders = self.get_valid_folders(usb_root_path)
-        
         if not usb_folders:
-            self.logger.info("No valid video folders found on USB drive")
             return False
         
-        self.logger.info(f"Found {len(usb_folders)} valid video folder(s) on USB drive")
-        
-        # Get valid folders from local directory
         local_folders = self.get_valid_folders(self.local_videos_path)
-        self.logger.info(f"Found {len(local_folders)} valid video folder(s) in local directory")
         
         # Ensure local videos directory exists
         try:
@@ -428,10 +402,7 @@ class USBSync:
         for folder_name, usb_folder in usb_folders.items():
             local_folder = self.local_videos_path / folder_name
             
-            # Check if this folder already exists with the same name
             if folder_name in local_folders:
-                # Folder exists with same name - just sync files
-                self.logger.info(f"Folder '{folder_name}' already exists, syncing files...")
                 copied, updated, errors = self.sync_folder(usb_folder, local_folder)
                 total_copied += copied
                 total_updated += updated
@@ -448,11 +419,7 @@ class USBSync:
                 )
                 
                 if existing_folder_name and existing_folder_path:
-                    # Found a folder with same video files - rename it instead of copying
                     try:
-                        self.logger.info(f"Renaming folder '{existing_folder_name}' to '{folder_name}' (same video files)")
-                        
-                        # Rename the folder
                         new_folder_path = self.local_videos_path / folder_name
                         existing_folder_path.rename(new_folder_path)
                         
@@ -469,20 +436,15 @@ class USBSync:
                         total_errors.extend(errors)
                         
                         total_renamed += 1
-                        self.logger.info(f"Successfully renamed folder from '{existing_folder_name}' to '{folder_name}'")
                     except Exception as e:
-                        error_msg = f"Failed to rename folder '{existing_folder_name}' to '{folder_name}': {e}"
+                        error_msg = f"Failed to rename folder: {e}"
                         total_errors.append(error_msg)
                         self.logger.error(error_msg)
-                        # Fall back to copying if rename fails
-                        self.logger.info(f"Falling back to copying folder '{folder_name}'...")
                         copied, updated, errors = self.sync_folder(usb_folder, local_folder)
                         total_copied += copied
                         total_updated += updated
                         total_errors.extend(errors)
                 else:
-                    # No matching folder found - copy the folder
-                    self.logger.info(f"Copying new folder: {folder_name}")
                     copied, updated, errors = self.sync_folder(usb_folder, local_folder)
                     total_copied += copied
                     total_updated += updated
@@ -495,26 +457,14 @@ class USBSync:
                 folders_to_delete.append((folder_name, local_folder))
         
         if folders_to_delete:
-            self.logger.info(f"Found {len(folders_to_delete)} local folder(s) not on USB drive")
             for folder_name, local_folder in folders_to_delete:
                 try:
-                    self.logger.info(f"Deleting local folder: {folder_name}")
                     shutil.rmtree(local_folder)
-                    self.logger.info(f"Deleted folder: {folder_name}")
                 except Exception as e:
                     error_msg = f"Failed to delete folder {folder_name}: {e}"
                     total_errors.append(error_msg)
                     self.logger.error(error_msg)
         
-        # Summary
-        self.logger.info("USB sync completed:")
-        self.logger.info(f"  - Folders synced: {len(usb_folders)}")
-        if total_renamed > 0:
-            self.logger.info(f"  - Folders renamed: {total_renamed}")
-        self.logger.info(f"  - Files copied: {total_copied}")
-        self.logger.info(f"  - Files updated: {total_updated}")
-        if folders_to_delete:
-            self.logger.info(f"  - Folders deleted: {len(folders_to_delete)}")
         if total_errors:
             self.logger.warning(f"  - Errors: {len(total_errors)}")
             for error in total_errors:
@@ -545,13 +495,8 @@ class USBSync:
                 rtc_file_path = Path(usb_mount) / rtc_file_name
                 
                 if rtc_file_path.exists() and rtc_file_path.is_file():
-                    self.logger.info(f"Found RTC time file: {rtc_file_path}")
-                    
-                    # Initialize time sync manager and set RTC
                     time_sync = TimeSyncManager(self.log_file)
-                    
                     if time_sync.set_rtc_from_file(str(rtc_file_path)):
-                        self.logger.info("RTC time set successfully from USB drive")
                         return True
                     else:
                         self.logger.warning(f"Failed to set RTC time from file: {rtc_file_path}")
@@ -561,8 +506,6 @@ class USBSync:
             
         except Exception as e:
             self.logger.error(f"Error checking RTC time file: {e}")
-            import traceback
-            self.logger.debug(traceback.format_exc())
             return False
     
     def sync_on_boot(self):
@@ -572,107 +515,29 @@ class USBSync:
         Returns:
             bool: True if USB was found and synced, False otherwise
         """
-        self.logger.info("Checking for USB drives on boot...")
-        
-        # Wait a bit for USB drives to be detected (if manually mounted)
         import time
         time.sleep(2)
         
-        # Find USB drives (expects them to be manually mounted)
         usb_mounts = self.find_usb_drives()
-        
         if not usb_mounts:
-            self.logger.info("No USB drives found")
             return False
         
-        self.logger.info(f"Found {len(usb_mounts)} potential USB drive(s)")
-        
-        # First, check for RTC time file on any USB drive
         rtc_set = False
         for usb_mount in usb_mounts:
             if self.check_rtc_time_file(usb_mount):
                 rtc_set = True
-                break  # Only set RTC once
+                break
         
-        # Try to sync from each USB drive until we find valid video folders
         for usb_mount in usb_mounts:
-            self.logger.info(f"Checking USB drive: {usb_mount}")
-            
-            # Check if this mount has valid video folders
             valid_folders = self.get_valid_folders(usb_mount)
-            
             if valid_folders:
-                self.logger.info(f"Found valid video folders on {usb_mount}, starting sync...")
                 success = self.sync_usb_to_local(usb_mount)
-                
-                if success:
-                    self.logger.info(f"USB sync completed successfully from {usb_mount}")
-                    if rtc_set:
-                        self.logger.info("RTC time was also set from USB drive")
-                    return True
-                else:
+                if not success:
                     self.logger.warning(f"USB sync completed with errors from {usb_mount}")
-                    if rtc_set:
-                        self.logger.info("RTC time was also set from USB drive")
-                    return True  # Still return True as sync was attempted
-            else:
-                # Even if no valid folders, check for RTC time file
-                if not rtc_set:
-                    self.check_rtc_time_file(usb_mount)
-                self.logger.debug(f"No valid video folders found on {usb_mount}")
+                return True
+            elif not rtc_set:
+                self.check_rtc_time_file(usb_mount)
         
-        if rtc_set:
-            self.logger.info("RTC time was set from USB drive (no video folders found)")
-            return True
-        
-        self.logger.info("No USB drives with valid video folders found")
         return False
 
-def main():
-    """Test the USB sync module"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='USB Drive Sync for Video Looper')
-    parser.add_argument('--usb-path', help='Path to USB drive to sync from')
-    parser.add_argument('--local-path', default='/home/looper/videos',
-                       help='Local videos directory path (default: /home/looper/videos)')
-    parser.add_argument('--test', action='store_true',
-                       help='Test mode - show what would be synced without copying')
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    
-    sync = USBSync(local_videos_path=args.local_path)
-    
-    if args.test:
-        print("Test mode - scanning for USB drives...")
-        usb_mounts = sync.find_usb_drives()
-        print(f"Found {len(usb_mounts)} USB drive(s):")
-        for mount in usb_mounts:
-            print(f"  - {mount}")
-            valid_folders = sync.get_valid_folders(mount)
-            print(f"    Valid video folders: {len(valid_folders)}")
-            for folder_name in valid_folders.keys():
-                print(f"      - {folder_name}")
-        
-        local_folders = sync.get_valid_folders(sync.local_videos_path)
-        print(f"\nLocal video folders: {len(local_folders)}")
-        for folder_name in local_folders.keys():
-            print(f"  - {folder_name}")
-    
-    elif args.usb_path:
-        print(f"Syncing from USB drive: {args.usb_path}")
-        sync.sync_usb_to_local(Path(args.usb_path))
-    
-    else:
-        print("Syncing on boot...")
-        sync.sync_on_boot()
-
-if __name__ == '__main__':
-    main()
 

@@ -7,10 +7,8 @@ Handles USB-to-serial communication with projectors/beamers
 import serial
 import logging
 import time
-import threading
 from pathlib import Path
 import json
-import re
 import subprocess
 
 class ProjectorController:
@@ -25,7 +23,6 @@ class ProjectorController:
         try:
             config_path = Path(config_file_path)
             if not config_path.exists():
-                self.logger.warning(f"Config file not found: {config_file_path}")
                 return False
             
             with open(config_path, 'r') as f:
@@ -58,11 +55,10 @@ class ProjectorController:
                             else:
                                 self.config[key] = value
             
-            self.logger.info(f"Loaded projector config: {self.config}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error loading config file {config_file_path}: {e}")
+            self.logger.error(f"Error loading config: {e}")
             return False
     
     def get_default_config(self):
@@ -105,21 +101,14 @@ class ProjectorController:
                 timeout=5
             )
             
-            if result.returncode == 0:
-                self.logger.debug(f"Serial port {port} configured with stty")
-                return True
-            else:
-                self.logger.warning(f"stty configuration failed: {result.stderr.decode()}")
-                return False
+            return result.returncode == 0
                 
-        except Exception as e:
-            self.logger.warning(f"Error configuring serial port with stty: {e}")
+        except Exception:
             return False
     
     def connect(self):
         """Connect to projector via serial"""
         if not self.config.get('enable_projector', False):
-            self.logger.info("Projector control disabled in config")
             return True
         
         try:
@@ -142,15 +131,10 @@ class ProjectorController:
             )
             
             self.is_connected = True
-            self.logger.info(f"Connected to projector on {port} at {baud_rate} baud")
             return True
             
-        except serial.SerialException as e:
-            self.logger.error(f"Failed to connect to projector: {e}")
-            self.is_connected = False
-            return False
         except Exception as e:
-            self.logger.error(f"Unexpected error connecting to projector: {e}")
+            self.logger.error(f"Failed to connect: {e}")
             self.is_connected = False
             return False
     
@@ -160,47 +144,37 @@ class ProjectorController:
             try:
                 self.serial_connection.close()
                 self.is_connected = False
-                self.logger.info("Disconnected from projector")
-            except Exception as e:
-                self.logger.error(f"Error disconnecting from projector: {e}")
+            except Exception:
+                pass
     
     def send_command(self, command):
         """Send a command to the projector"""
         if not self.is_connected or not self.serial_connection:
-            self.logger.warning("Not connected to projector, cannot send command")
             return False
         
         try:
-            # For Optoma: commands end with \r (carriage return), not \r\n
-            # Add carriage return if not present
             if not command.endswith('\r'):
                 command = command + '\r'
             
             self.serial_connection.write(command.encode())
-            self.logger.info(f"Sent command to projector: {repr(command)}")
             
-            # Wait for response if configured
             if self.config.get('wait_for_response', False):
-                time.sleep(0.5)  # Give projector time to respond
-                response = self.serial_connection.read_all().decode().strip()
-                if response:
-                    self.logger.info(f"Projector response: {response}")
+                time.sleep(0.5)
+                self.serial_connection.read_all()
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Error sending command to projector: {e}")
+            self.logger.error(f"Error sending command: {e}")
             return False
     
     def start_projector(self):
         """Start the projector"""
         if not self.config.get('enable_projector', False):
-            self.logger.info("Projector control disabled, skipping start")
             return True
         
         start_delay = int(self.config.get('start_delay', 0))
         if start_delay > 0:
-            self.logger.info(f"Waiting {start_delay} seconds before starting projector...")
             time.sleep(start_delay)
         
         start_command = self.config.get('start_command', '~0000 1')
@@ -209,30 +183,14 @@ class ProjectorController:
     def stop_projector(self):
         """Stop the projector"""
         if not self.config.get('enable_projector', False):
-            self.logger.info("Projector control disabled, skipping stop")
             return True
         
         stop_delay = int(self.config.get('stop_delay', 0))
         if stop_delay > 0:
-            self.logger.info(f"Waiting {stop_delay} seconds before stopping projector...")
             time.sleep(stop_delay)
         
         stop_command = self.config.get('stop_command', '~0000 0')
         return self.send_command(stop_command)
-    
-    def test_connection(self):
-        """Test projector connection"""
-        if not self.config.get('enable_projector', False):
-            return True
-        
-        if self.connect():
-            # Try to send a status command if available
-            status_command = self.config.get('status_command', '')
-            if status_command:
-                self.send_command(status_command)
-            self.disconnect()
-            return True
-        return False
     
     def get_available_ports(self):
         """Get list of available serial ports"""
@@ -245,64 +203,3 @@ class ProjectorController:
                 'manufacturer': port.manufacturer
             })
         return ports
-
-def main():
-    """Test the projector controller"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Projector Controller')
-    parser.add_argument('--config', help='Path to config file')
-    parser.add_argument('--test', action='store_true', help='Test connection')
-    parser.add_argument('--list-ports', action='store_true', help='List available serial ports')
-    parser.add_argument('--start', action='store_true', help='Start projector')
-    parser.add_argument('--stop', action='store_true', help='Stop projector')
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    
-    controller = ProjectorController()
-    
-    if args.list_ports:
-        print("Available serial ports:")
-        ports = controller.get_available_ports()
-        for port in ports:
-            print(f"  {port['device']}: {port['description']} ({port['manufacturer']})")
-        return
-    
-    if args.config:
-        if controller.load_config_from_file(args.config):
-            print("✓ Config loaded successfully")
-        else:
-            print("✗ Failed to load config")
-            return
-    
-    if args.test:
-        print("Testing projector connection...")
-        if controller.test_connection():
-            print("✓ Projector connection test successful")
-        else:
-            print("✗ Projector connection test failed")
-    
-    elif args.start:
-        if controller.load_config_from_file(args.config):
-            if controller.connect():
-                controller.start_projector()
-                controller.disconnect()
-    
-    elif args.stop:
-        if controller.load_config_from_file(args.config):
-            if controller.connect():
-                controller.stop_projector()
-                controller.disconnect()
-    
-    else:
-        print("Projector Controller")
-        print("Use --help for available options")
-
-if __name__ == '__main__':
-    main()

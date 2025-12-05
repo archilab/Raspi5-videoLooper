@@ -94,6 +94,13 @@ if groups looper | grep -q '\bsudo\b'; then
     echo -e "${GREEN}✓ Removed 'looper' from sudo group${NC}"
 fi
 
+# Add looper to input group for keyboard access
+if ! groups looper | grep -q '\binput\b'; then
+    echo -e "${GREEN}Adding 'looper' to input group for keyboard access...${NC}"
+    sudo usermod -aG input looper
+    echo -e "${GREEN}✓ Added 'looper' to input group${NC}"
+fi
+
 # Check if running on Raspberry Pi
 if ! grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
     echo -e "${YELLOW}Warning: This script is designed for Raspberry Pi. Continue anyway? (y/N)${NC}"
@@ -117,7 +124,8 @@ sudo apt install -y \
     ffmpeg \
     python3-requests \
     python3-serial \
-    cec-utils 
+    cec-utils \
+    python3-evdev 
 
 sudo apt-get install -y pmount
 
@@ -202,6 +210,7 @@ sudo cp -f time_sync.py "$INSTALL_DIR/"
 sudo cp -f projector_controller.py "$INSTALL_DIR/"
 sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
+sudo cp -f keyboard_monitor.py "$INSTALL_DIR/"
 sudo cp -f constants.py "$INSTALL_DIR/"
 sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
@@ -209,6 +218,7 @@ sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
 sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 sudo chmod +x "$INSTALL_DIR/usb_sync.py"
+sudo chmod +x "$INSTALL_DIR/keyboard_monitor.py"
 sudo chmod +x "$INSTALL_DIR/constants.py"
 
 echo -e "${GREEN}Step 6: Setting up Python environment...${NC}"
@@ -220,6 +230,8 @@ if [ -f "$INSTALL_DIR/venv/bin/activate" ]; then
     echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
     # Use the virtual environment's pip directly instead of sourcing
     sudo -u looper bash -c "cd '$INSTALL_DIR' && ./venv/bin/pip install --upgrade pip"
+    # Install python-evdev in virtual environment (if not available via apt)
+    sudo -u looper bash -c "cd '$INSTALL_DIR' && ./venv/bin/pip install evdev" || echo -e "${YELLOW}⚠ Could not install evdev in venv, using system package${NC}"
 else
     echo -e "${YELLOW}⚠ Virtual environment creation failed, using system pip${NC}"
     pip3 install --upgrade pip

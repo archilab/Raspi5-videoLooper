@@ -21,6 +21,7 @@ This project creates an automated video looper system for Raspberry Pi 5 that us
 - **Efficient Logging**: Minimal logging (errors and warnings only) to reduce SD card wear
 - **Easy Management**: Simple service commands for start/stop/restart
 - **Clean Codebase**: Centralized constants, improved code organization, and reduced duplication
+- **Keyboard Test Mode**: Press Ctrl+F1 to test all video folders (1 minute each with 30 second pauses)
 
 ## Folder Naming Convention
 
@@ -682,7 +683,17 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
    - Verify HDMI connection is active
    - Check if display supports CEC (enabled in display settings)
 
-8. **USB sync issues**:
+8. **Keyboard test mode not working**:
+   - Check if looper user is in input group: `groups looper` (should include `input`)
+   - If not, add manually: `sudo usermod -aG input looper` (requires logout/login or reboot)
+   - Verify keyboard device permissions: `ls -la /dev/input/event*`
+   - Check if python-evdev is installed: `python3 -c "import evdev; print('OK')"`
+   - Test keyboard detection: `python3 -c "from keyboard_monitor import KeyboardMonitor; m = KeyboardMonitor(lambda: None); print('Available:', m.is_available())"`
+   - Check logs for keyboard errors: `sudo journalctl -u video-looper | grep -i keyboard`
+   - Ensure keyboard is connected and detected: `cat /proc/bus/input/devices | grep -i keyboard`
+   - If using USB keyboard, verify it's detected: `lsusb | grep -i keyboard`
+
+9. **USB sync issues**:
    - Verify USB drive is mounted: `mount | grep -i usb`
    - Check mount points: `ls -la /media/usb0 /media/usb1 /media/usb2 /media/usb3`
    - Check if usbmount is installed: `dpkg -l | grep usbmount` (optional, uses udev if not available)
@@ -702,7 +713,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
      - Manually test mount: `sudo mount /dev/sda1 /media/usb0`
      - Check mount script manually: `sudo /usr/local/bin/usb-mount.sh sda1`
 
-9. **RTC time setting issues**:
+10. **RTC time setting issues**:
    - Verify RTC time file exists on USB: `ls /media/looper/rtc_time.txt`
    - Check time file format: `cat /media/looper/rtc_time.txt`
    - Test RTC time setting: `python3 time_sync.py --set-rtc-from-file /media/looper/rtc_time.txt`
@@ -775,6 +786,7 @@ Raspi5-videoLooper/
 ├── projector_controller.py  # Projector control module
 ├── hdmi_controller.py       # HDMI display control module (CEC)
 ├── usb_sync.py              # USB drive synchronization module
+├── keyboard_monitor.py      # Keyboard input monitoring for test mode
 ├── video-looper.service     # Systemd service file
 ├── install.sh              # Installation script
 ├── setup_examples.sh        # Example folder structure setup
@@ -788,9 +800,10 @@ Raspi5-videoLooper/
 ### Module Dependencies
 
 The modules have the following dependencies:
-- `video_looper.py` imports from: `constants`, `time_sync`, `projector_controller`, `hdmi_controller`, `usb_sync`
+- `video_looper.py` imports from: `constants`, `time_sync`, `projector_controller`, `hdmi_controller`, `usb_sync`, `keyboard_monitor`
 - `projector_controller.py` imports from: `constants`
 - `usb_sync.py` imports from: `constants`
+- `keyboard_monitor.py` imports from: `constants`
 - All modules use centralized constants from `constants.py` to avoid duplication
 
 ## System Requirements

@@ -41,3 +41,9 @@ USB_MOUNT_POINTS = [
     '/media/usb3'
 ]
 
+# Test mode constants
+TEST_MODE_KEY_CTRL = 29  # Left Ctrl key code (Linux input event)
+TEST_MODE_KEY_F1 = 59   # F1 key code (Linux input event)
+TEST_PLAY_DURATION = 60  # seconds - 1 minute per folder
+TEST_PAUSE_DURATION = 30  # seconds - pause between folders
+

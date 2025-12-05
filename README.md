@@ -18,8 +18,9 @@ This project creates an automated video looper system for Raspberry Pi 5 that us
 - **Automatic Startup**: Runs as a systemd service, starting automatically on boot
 - **Multiple Video Support**: Loops through all videos in active folders
 - **Graceful Switching**: Automatically switches between different video sets based on schedule
-- **Comprehensive Logging**: Detailed logs for monitoring and debugging
+- **Efficient Logging**: Minimal logging (errors and warnings only) to reduce SD card wear
 - **Easy Management**: Simple service commands for start/stop/restart
+- **Clean Codebase**: Centralized constants, improved code organization, and reduced duplication
 
 ## Folder Naming Convention
 
@@ -69,7 +70,7 @@ The installation script will:
 - Install VLC, Python dependencies, time synchronization tools, and CEC utilities
 - Configure NTP synchronization with multiple servers
 - Create necessary directories (`/home/looper/video_looper` and `/home/looper/videos`)
-- Copy files to appropriate locations (including HDMI controller and USB sync modules)
+- Copy all required files to appropriate locations (including all Python modules and constants)
 - Set up the systemd service
 - Configure permissions
 - Test the installation
@@ -103,6 +104,8 @@ If you prefer manual installation:
    sudo cp projector_controller.py /home/looper/video_looper/
    sudo cp hdmi_controller.py /home/looper/video_looper/
    sudo cp usb_sync.py /home/looper/video_looper/
+   sudo cp constants.py /home/looper/video_looper/
+   sudo cp config.conf /home/looper/video_looper/
    sudo cp video-looper.service /etc/systemd/system/
    ```
 
@@ -113,6 +116,7 @@ If you prefer manual installation:
    sudo chmod +x /home/looper/video_looper/projector_controller.py
    sudo chmod +x /home/looper/video_looper/hdmi_controller.py
    sudo chmod +x /home/looper/video_looper/usb_sync.py
+   sudo chmod +x /home/looper/video_looper/constants.py
    sudo chown -R looper:looper /home/looper/video_looper
    sudo chown -R looper:looper /home/looper/videos
    ```
@@ -618,6 +622,8 @@ You can customize the videos directory and log file location:
 python3 video_looper.py --videos-path /custom/videos/path --log-file /custom/log/path
 ```
 
+**Note**: Default paths are defined in `constants.py`. To change defaults permanently, edit `constants.py` before installation, or use command-line arguments to override at runtime.
+
 ### Service Configuration
 
 The systemd service file (`/etc/systemd/system/video-looper.service`) runs as the `looper` user. The service file can be modified to:
@@ -764,6 +770,7 @@ For optimal performance:
 ```
 Raspi5-videoLooper/
 ├── video_looper.py          # Main Python script
+├── constants.py             # Centralized constants (paths, formats, defaults)
 ├── time_sync.py             # Time synchronization module
 ├── projector_controller.py  # Projector control module
 ├── hdmi_controller.py       # HDMI display control module (CEC)
@@ -777,6 +784,14 @@ Raspi5-videoLooper/
 ├── README.md               # This documentation
 └── .gitattributes          # Git configuration
 ```
+
+### Module Dependencies
+
+The modules have the following dependencies:
+- `video_looper.py` imports from: `constants`, `time_sync`, `projector_controller`, `hdmi_controller`, `usb_sync`
+- `projector_controller.py` imports from: `constants`
+- `usb_sync.py` imports from: `constants`
+- All modules use centralized constants from `constants.py` to avoid duplication
 
 ## System Requirements
 
@@ -794,6 +809,19 @@ Raspi5-videoLooper/
 - Log files are accessible only to the looper user
 - No network services exposed
 - The looper user is automatically created during installation if it doesn't exist
+- Minimal logging (WARNING level) reduces disk writes and improves SD card longevity
+
+## Code Organization
+
+The codebase follows clean code principles:
+
+- **Centralized Constants**: All constants (paths, formats, defaults) are defined in `constants.py`
+- **Reduced Duplication**: Common logic is centralized to avoid code duplication
+- **Minimal Logging**: Only errors and warnings are logged to reduce SD card wear on Raspberry Pi
+- **Clear Module Structure**: Each module has a single, well-defined responsibility
+- **Type Safety**: Constants use appropriate types (frozen sets, etc.) for better reliability
+
+To modify default values (video formats, paths, timing constants), edit `constants.py` before installation or reinstall after changes.
 
 ## Support
 

@@ -202,12 +202,14 @@ sudo cp -f time_sync.py "$INSTALL_DIR/"
 sudo cp -f projector_controller.py "$INSTALL_DIR/"
 sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
+sudo cp -f constants.py "$INSTALL_DIR/"
 sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
 sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 sudo chmod +x "$INSTALL_DIR/usb_sync.py"
+sudo chmod +x "$INSTALL_DIR/constants.py"
 
 echo -e "${GREEN}Step 6: Setting up Python environment...${NC}"
 # Create Python virtual environment as looper user
@@ -354,8 +356,8 @@ enable_projector=true
 serial_port=/dev/ttyUSB0
 baud_rate=9600
 timeout=5
-start_command=PWR ON
-stop_command=PWR OFF
+start_command=~0000 1
+stop_command=~0000 0
 start_delay=2
 stop_delay=1
 video_start_delay=5
@@ -373,8 +375,8 @@ enable_projector=true
 serial_port=/dev/ttyUSB0
 baud_rate=9600
 timeout=5
-start_command=PWR ON
-stop_command=PWR OFF
+start_command=~0000 1
+stop_command=~0000 0
 start_delay=2
 stop_delay=1
 video_start_delay=5

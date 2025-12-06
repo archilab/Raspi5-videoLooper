@@ -152,10 +152,10 @@ check_time_sync() {
     
     echo ""
     echo "Testing time sync:"
-    if python3 time_sync.py --test; then
-        echo -e "${GREEN}✓ Time sync test passed${NC}"
+    if python3 "$VIDEO_LOOPER_DIR/time_sync.py" --status; then
+        echo -e "${GREEN}✓ Time sync status retrieved${NC}"
     else
-        echo -e "${RED}✗ Time sync test failed${NC}"
+        echo -e "${RED}✗ Time sync status check failed${NC}"
     fi
 }
 

@@ -10,6 +10,9 @@ import time
 import subprocess
 import logging
 import re
+import select
+import termios
+import tty
 from datetime import datetime, timedelta
 from pathlib import Path
 import signal
@@ -290,30 +293,259 @@ class VideoLooper:
             except (PermissionError, OSError) as e:
                 self.logger.error(f"Could not write to TTY1: {e}")
             
-            # Keep the information visible for 20 seconds
-            display_duration = 20  # seconds
+            # Keep the information visible for 10 seconds before showing menu
+            time.sleep(10)
             
-            for remaining in range(display_duration, 0, -1):
-                # Refresh display every 2 seconds to keep it visible
-                if remaining % 2 == 0 or remaining <= 5:
+            # Show boot menu after folder info
+            return self.display_boot_menu()
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying folder info: {e}")
+            return None
+    
+    def get_char_non_blocking(self, timeout=0.1):
+        """Get a single character from TTY with timeout"""
+        try:
+            # Try reading from /dev/tty1 (main console)
+            tty_path = '/dev/tty1'
+            if os.path.exists(tty_path):
+                # Use select to check if input is available
+                tty_fd = os.open(tty_path, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    if select.select([tty_fd], [], [], timeout)[0]:
+                        char = os.read(tty_fd, 1).decode('utf-8', errors='ignore')
+                        return char
+                finally:
+                    os.close(tty_fd)
+        except Exception:
+            pass
+        return None
+    
+    def display_boot_menu(self):
+        """Display boot menu UI and handle user selection"""
+        try:
+            menu_timeout = 20  # seconds to wait for input
+            start_time = time.time()
+            
+            while True:
+                # Build menu text
+                lines = []
+                lines.append("")
+                lines.append("=" * 60)
+                lines.append("Video Looper - Boot Menu")
+                lines.append("=" * 60)
+                lines.append("")
+                lines.append("Select an option:")
+                lines.append("")
+                lines.append("  1. Set RTC Time Manually")
+                lines.append("  2. Sync RTC with NTP")
+                lines.append("  3. Start Demo Mode")
+                lines.append("")
+                lines.append("  Press 1, 2, 3, or Enter to continue...")
+                lines.append("")
+                
+                remaining = int(menu_timeout - (time.time() - start_time))
+                if remaining > 0:
+                    lines.append(f"  Auto-continuing in {remaining} second(s)...")
+                else:
+                    lines.append("  Auto-continuing...")
+                lines.append("")
+                
+                text = "\n".join(lines)
+                
+                # Display on TTY1
+                try:
+                    tty1_path = '/dev/tty1'
+                    if os.path.exists(tty1_path):
+                        with open(tty1_path, 'w') as tty1:
+                            tty1.write('\033[2J\033[H')
+                            tty1.write(text)
+                            tty1.flush()
+                except (PermissionError, OSError):
+                    pass
+                
+                # Check for input
+                if time.time() - start_time >= menu_timeout:
+                    return None  # Timeout, continue normal operation
+                
+                char = self.get_char_non_blocking(0.5)
+                
+                if char == '1':
+                    self.handle_manual_time_setting()
+                    return None
+                elif char == '2':
+                    self.handle_ntp_sync()
+                    return None
+                elif char == '3':
+                    return 'demo'  # Return demo mode flag
+                elif char == '\n' or char == '\r':
+                    return None  # Enter pressed, continue
+                
+                time.sleep(0.1)
+                
+        except Exception as e:
+            self.logger.error(f"Error in boot menu: {e}")
+            return None
+    
+    def handle_manual_time_setting(self):
+        """Handle manual RTC time setting"""
+        try:
+            # Show input prompt
+            prompt_lines = []
+            prompt_lines.append("")
+            prompt_lines.append("=" * 60)
+            prompt_lines.append("Set RTC Time Manually")
+            prompt_lines.append("=" * 60)
+            prompt_lines.append("")
+            prompt_lines.append("Enter time in format: YYYY-MM-DD HH:MM:SS")
+            prompt_lines.append("Example: 2024-01-15 14:30:00")
+            prompt_lines.append("")
+            prompt_lines.append("Time: ")
+            
+            prompt_text = "\n".join(prompt_lines)
+            
+            # Display prompt
+            try:
+                tty1_path = '/dev/tty1'
+                if os.path.exists(tty1_path):
+                    with open(tty1_path, 'w') as tty1:
+                        tty1.write('\033[2J\033[H')
+                        tty1.write(prompt_text)
+                        tty1.flush()
+            except (PermissionError, OSError):
+                pass
+            
+            # Read input from stdin (with timeout)
+            time_str = None
+            input_timeout = 60
+            start_time = time.time()
+            
+            input_buffer = ""
+            while time.time() - start_time < input_timeout:
+                char = self.get_char_non_blocking(0.5)
+                if char:
+                    if char == '\n' or char == '\r':
+                        time_str = input_buffer.strip()
+                        break
+                    elif char == '\x7f' or char == '\b':  # Backspace
+                        input_buffer = input_buffer[:-1] if input_buffer else ""
+                    elif char.isprintable():
+                        input_buffer += char
+                    
+                    # Update display with current input
                     try:
                         tty1_path = '/dev/tty1'
                         if os.path.exists(tty1_path):
                             with open(tty1_path, 'w') as tty1:
-                                # Clear screen using ANSI escape codes
-                                tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
-                                tty1.write(text)
-                                if remaining <= 5:
-                                    countdown_msg = f"\n\nStarting video loop in {remaining} second(s)...\n"
-                                    tty1.write(countdown_msg)
+                                tty1.write('\033[2J\033[H')
+                                tty1.write(prompt_text)
+                                tty1.write(input_buffer)
                                 tty1.flush()
                     except (PermissionError, OSError):
                         pass
+            
+            if time_str:
+                # Set time
+                if self.time_sync.set_time_manually(time_str):
+                    self.show_message("Time set successfully!", 3)
+                else:
+                    self.show_message("Failed to set time. Please check format.", 5)
+            else:
+                self.show_message("Input timeout. Returning to menu...", 3)
                 
-                time.sleep(1)
+        except Exception as e:
+            self.logger.error(f"Error in manual time setting: {e}")
+            self.show_message(f"Error: {str(e)}", 3)
+    
+    def handle_ntp_sync(self):
+        """Handle NTP sync"""
+        try:
+            self.show_message("Syncing RTC with NTP...", 2)
+            
+            if self.time_sync.sync_rtc_with_ntp():
+                self.show_message("RTC synced with NTP successfully!", 3)
+            else:
+                self.show_message("Failed to sync with NTP. Check internet connection.", 5)
+                
+        except Exception as e:
+            self.logger.error(f"Error in NTP sync: {e}")
+            self.show_message(f"Error: {str(e)}", 3)
+    
+    def show_message(self, message, duration=3):
+        """Show a message on screen for specified duration"""
+        try:
+            lines = []
+            lines.append("")
+            lines.append("=" * 60)
+            lines.append(message)
+            lines.append("=" * 60)
+            lines.append("")
+            
+            text = "\n".join(lines)
+            
+            try:
+                tty1_path = '/dev/tty1'
+                if os.path.exists(tty1_path):
+                    with open(tty1_path, 'w') as tty1:
+                        tty1.write('\033[2J\033[H')
+                        tty1.write(text)
+                        tty1.flush()
+            except (PermissionError, OSError):
+                pass
+            
+            time.sleep(duration)
             
         except Exception as e:
-            self.logger.error(f"Error displaying folder info: {e}")
+            self.logger.error(f"Error showing message: {e}")
+    
+    def run_demo_mode(self):
+        """Run demo mode - play all folders for 1 minute each with 30 sec pause"""
+        try:
+            all_folders = self.get_all_valid_folders()
+            
+            if not all_folders:
+                self.show_message("No valid video folders found for demo mode.", 5)
+                return
+            
+            self.show_message(f"Starting demo mode with {len(all_folders)} folder(s)...", 3)
+            
+            # Wake HDMI
+            if self.hdmi.is_available():
+                self.hdmi.wake_hdmi()
+                time.sleep(HDMI_WAKE_DELAY)
+            
+            for folder_path, video_files in all_folders:
+                folder_name = folder_path.name
+                self.show_message(f"Demo: Playing {folder_name}...", 2)
+                
+                # Start projector if configured
+                if self.has_projector_config(folder_path):
+                    self.load_projector_config(folder_path)
+                    if self.projector.config.get('enable_projector', False):
+                        if self.projector.connect():
+                            self.projector.start_projector()
+                
+                # Play videos for 1 minute (no looping in demo mode)
+                if self.start_video_timed(video_files, folder_path, duration=60):
+                    # Wait for video playback to complete (max 65 seconds to account for startup)
+                    if self.current_process:
+                        try:
+                            self.current_process.wait(timeout=65)
+                        except subprocess.TimeoutExpired:
+                            pass
+                    self.stop_video(standby_hdmi=False)
+                    
+                    # Pause for 30 seconds between folders
+                    if folder_path != all_folders[-1][0]:  # Not the last folder
+                        time.sleep(30)
+            
+            self.show_message("Demo mode completed!", 3)
+            
+        except Exception as e:
+            self.logger.error(f"Error in demo mode: {e}")
+            self.show_message(f"Error in demo mode: {str(e)}", 5)
+        finally:
+            self.stop_video(standby_hdmi=True)
     
     def start_video(self, video_files, folder_path):
         """Start VLC with video files in loop mode and control projector"""
@@ -321,8 +553,15 @@ class VideoLooper:
             self.logger.error("No video files provided")
             return False
         
+        # Wake HDMI before starting video - ensure it's awake
         if self.hdmi.is_available():
-            if self.hdmi.wake_hdmi():
+            self.hdmi.wake_hdmi()
+            time.sleep(HDMI_WAKE_DELAY)
+            # Verify HDMI is awake, retry if needed
+            hdmi_state = self.hdmi.get_hdmi_power()
+            if hdmi_state == 0:
+                time.sleep(1)
+                self.hdmi.wake_hdmi()
                 time.sleep(HDMI_WAKE_DELAY)
         
         if self.has_projector_config(folder_path):
@@ -362,6 +601,67 @@ class VideoLooper:
             self.logger.error(traceback.format_exc())
             return False
     
+    def start_video_timed(self, video_files, folder_path, duration=60):
+        """
+        Start VLC with video files for a specific duration (no looping)
+        Used for demo mode
+        Args:
+            video_files: List of video file paths
+            folder_path: Path to folder containing videos
+            duration: Duration in seconds to play
+        Returns:
+            bool: True if started successfully, False otherwise
+        """
+        if not video_files:
+            self.logger.error("No video files provided")
+            return False
+        
+        # Wake HDMI before starting video - ensure it's awake
+        if self.hdmi.is_available():
+            self.hdmi.wake_hdmi()
+            time.sleep(HDMI_WAKE_DELAY)
+            # Verify HDMI is awake, retry if needed
+            hdmi_state = self.hdmi.get_hdmi_power()
+            if hdmi_state == 0:
+                time.sleep(1)
+                self.hdmi.wake_hdmi()
+                time.sleep(HDMI_WAKE_DELAY)
+        
+        if self.has_projector_config(folder_path):
+            self.load_projector_config(folder_path)
+            if self.projector.config.get('enable_projector', False):
+                if not self.projector.connect():
+                    self.logger.error("Failed to connect to projector")
+                elif not self.projector.start_projector():
+                    self.logger.error("Failed to start projector")
+            self.handle_video_start_delay(folder_path)
+        
+        # Create VLC command for timed playback (no loop)
+        vlc_cmd = [
+            'cvlc',
+            '--intf', 'dummy',
+            '--fullscreen',
+            '--run-time', str(duration),  # Play for specified duration
+            '--no-osd',
+            '--no-audio',
+            '--quiet',
+        ]
+        
+        # Add all video files to the command
+        vlc_cmd.extend([str(f) for f in video_files])
+        
+        try:
+            self.current_process = subprocess.Popen(
+                vlc_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            self.current_folder = folder_path
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to start VLC: {e}")
+            return False
+    
     def stop_video(self, standby_hdmi=False):
         """
         Stop the current video playback and projector
@@ -390,8 +690,14 @@ class VideoLooper:
             self.clear_display()
             if self.hdmi.is_available():
                 time.sleep(1)
-                if not self.hdmi.standby_hdmi():
-                    self.logger.error("Failed to put HDMI in standby")
+                # Ensure HDMI goes to standby - retry if needed
+                self.hdmi.standby_hdmi()
+                time.sleep(1)
+                # Verify HDMI is in standby, retry if still awake
+                hdmi_state = self.hdmi.get_hdmi_power()
+                if hdmi_state == 1:
+                    time.sleep(1)
+                    self.hdmi.standby_hdmi()
         
         self.current_folder = None
     
@@ -457,6 +763,8 @@ class VideoLooper:
         except Exception:
             pass
         
+        # Sync time - uses RTC by default, automatically falls back to NTP if RTC unavailable
+        # Warning will be shown automatically if neither RTC nor NTP is available
         self.time_sync.sync_time()
         self.time_sync.start_background_sync()
         
@@ -467,17 +775,42 @@ class VideoLooper:
                 
                 if active_folder_info:
                     folder_path, video_files = active_folder_info
+                    # Check if folder changed or video not playing
                     if current_folder != folder_path:
+                        # Folder changed - stop old video and start new one
                         self.stop_video(standby_hdmi=False)
                         if self.start_video(video_files, folder_path):
                             current_folder = folder_path
                         else:
                             current_folder = None
+                    elif self.current_process is None:
+                        # Video should be playing but process is not running - restart
+                        self.stop_video(standby_hdmi=False)
+                        if self.start_video(video_files, folder_path):
+                            current_folder = folder_path
+                        else:
+                            current_folder = None
+                    elif self.current_process.poll() is not None:
+                        # Process has ended unexpectedly - restart
+                        self.stop_video(standby_hdmi=False)
+                        if self.start_video(video_files, folder_path):
+                            current_folder = folder_path
+                        else:
+                            current_folder = None
+                    else:
+                        # Video is playing correctly - ensure HDMI is awake
+                        if self.hdmi.is_available():
+                            hdmi_state = self.hdmi.get_hdmi_power()
+                            if hdmi_state == 0:
+                                self.hdmi.wake_hdmi()
                 else:
-                    if self.current_folder is not None or self.current_process is not None:
+                    # No active folder - stop video and put HDMI in standby
+                    if self.current_folder is not None or (self.current_process is not None and self.current_process.poll() is None):
+                        # Video is playing but folder is no longer active - stop it
                         self.stop_video(standby_hdmi=True)
                         current_folder = None
                     elif self.hdmi.is_available():
+                        # Ensure HDMI is in standby when no video is playing
                         hdmi_state = self.hdmi.get_hdmi_power()
                         if hdmi_state == 1:
                             self.hdmi.standby_hdmi()
@@ -658,8 +991,12 @@ def main():
         return
     
     elif args.display_folder_info:
-        # Display folder information on screen
-        looper.display_folder_info_on_screen()
+        # Display folder information on screen and show boot menu
+        menu_result = looper.display_folder_info_on_screen()
+        
+        # Check if demo mode was selected
+        if menu_result == 'demo':
+            looper.run_demo_mode()
         return
     
     looper.run()

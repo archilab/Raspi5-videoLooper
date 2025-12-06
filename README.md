@@ -407,10 +407,16 @@ You can also set RTC time manually using the time sync module:
 
 ```bash
 # Set RTC from a time file
-python3 time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
+python3 /home/looper/video_looper/time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
 
 # Check current RTC status
-python3 time_sync.py --status
+python3 /home/looper/video_looper/time_sync.py --status
+
+# Sync RTC with NTP if available
+python3 /home/looper/video_looper/time_sync.py --sync-rtc-ntp
+
+# Set time manually
+python3 /home/looper/video_looper/time_sync.py --set-time "2024-01-15 14:30:00"
 ```
 
 ### Example Usage
@@ -426,7 +432,7 @@ python3 time_sync.py --status
 
 3. **Verify time was set**:
    ```bash
-   python3 time_sync.py --status
+   python3 /home/looper/video_looper/time_sync.py --status
    ```
 
 ### Notes
@@ -514,7 +520,7 @@ The system automatically handles time synchronization using a multi-tier approac
 
 5. **Manual RTC Setting**: Set RTC from time file
    ```bash
-   python3 time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
+   python3 /home/looper/video_looper/time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
    ```
 
 ## Projector Control
@@ -652,7 +658,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
 
 4. **Time synchronization issues**:
    - Check NTP status: `timedatectl status`
-   - Test time sync: `python3 time_sync.py --test`
+   - Check time sync status: `python3 /home/looper/video_looper/time_sync.py --status`
    - Check internet connectivity: `ping -c 3 8.8.8.8`
    - Restart timesyncd: `sudo systemctl restart systemd-timesyncd`
 
@@ -699,7 +705,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
 9. **RTC time setting issues**:
    - Verify RTC time file exists on USB: `ls /media/looper/rtc_time.txt`
    - Check time file format: `cat /media/looper/rtc_time.txt`
-   - Test RTC time setting: `python3 time_sync.py --set-rtc-from-file /media/looper/rtc_time.txt`
+   - Test RTC time setting: `python3 /home/looper/video_looper/time_sync.py --set-rtc-from-file /media/looper/rtc_time.txt`
    - Verify RTC is available: `sudo hwclock --show`
    - Check for parsing errors in logs: `sudo journalctl -u video-looper | grep -i rtc`
    - Ensure time file is in root of USB drive (not in subdirectory)

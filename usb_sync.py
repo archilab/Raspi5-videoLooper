@@ -8,6 +8,7 @@ import os
 import sys
 import logging
 import shutil
+import time
 from pathlib import Path
 import re
 from datetime import datetime
@@ -23,6 +24,25 @@ class USBSync:
         self.logger = logging.getLogger(__name__)
         self.local_videos_path = Path(local_videos_path or DEFAULT_VIDEOS_PATH)
         self.log_file = log_file or DEFAULT_LOG_FILE
+    
+    def display_message_on_screen(self, message):
+        """
+        Display a message on the HDMI screen (TTY1)
+        Args:
+            message: Message string to display
+        """
+        try:
+            tty1_path = '/dev/tty1'
+            if os.path.exists(tty1_path):
+                with open(tty1_path, 'w') as tty1:
+                    # Clear screen and display message
+                    tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
+                    tty1.write(f"\n\n{message}\n\n")
+                    tty1.flush()
+        except (PermissionError, OSError):
+            pass
+        except Exception:
+            pass
         
     def find_usb_drives(self):
         """
@@ -405,6 +425,11 @@ class USBSync:
             self.logger.error(f"Failed to create local videos directory: {e}")
             return False
         
+        # Display start message on screen
+        folder_count = len(usb_folders)
+        start_message = f"USB Sync Started\nCopying {folder_count} folder(s) from USB drive..."
+        self.display_message_on_screen(start_message)
+        
         # Sync folders: copy/update from USB or rename existing folders
         total_copied = 0
         total_updated = 0
@@ -482,6 +507,32 @@ class USBSync:
             self.logger.warning(f"  - Errors: {len(total_errors)}")
             for error in total_errors:
                 self.logger.warning(f"    {error}")
+        
+        # Display completion message on screen
+        if total_copied > 0 or total_updated > 0 or total_renamed > 0:
+            if total_errors:
+                completion_message = (
+                    f"USB Sync Completed with Errors\n"
+                    f"Copied: {total_copied} file(s)\n"
+                    f"Updated: {total_updated} file(s)\n"
+                    f"Renamed: {total_renamed} folder(s)\n"
+                    f"Errors: {len(total_errors)}"
+                )
+            else:
+                completion_message = (
+                    f"USB Sync Completed Successfully\n"
+                    f"Copied: {total_copied} file(s)\n"
+                    f"Updated: {total_updated} file(s)\n"
+                    f"Renamed: {total_renamed} folder(s)"
+                )
+            self.display_message_on_screen(completion_message)
+            # Keep message visible for 5 seconds
+            time.sleep(5)
+        else:
+            # No files copied/updated, just show brief message
+            if not total_errors:
+                self.display_message_on_screen("USB Sync Completed\nNo changes needed")
+                time.sleep(3)
         
         return len(total_errors) == 0
     

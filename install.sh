@@ -94,12 +94,40 @@ if groups looper | grep -q '\bsudo\b'; then
     echo -e "${GREEN}✓ Removed 'looper' from sudo group${NC}"
 fi
 
-# Add looper to input group for keyboard access
-if ! groups looper | grep -q '\binput\b'; then
-    echo -e "${GREEN}Adding 'looper' to input group for keyboard access...${NC}"
-    sudo usermod -aG input looper
-    echo -e "${GREEN}✓ Added 'looper' to input group${NC}"
+# Configure autologin for looper user on TTY1
+echo -e "${GREEN}Configuring autologin for looper user...${NC}"
+# Create systemd override directory
+sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
+
+# Create autologin configuration
+sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf > /dev/null <<'AUTOLOGIN'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin looper --noclear %I $TERM
+AUTOLOGIN
+
+echo -e "${GREEN}✓ Autologin configured for looper user${NC}"
+
+# Create startup script that displays folder info after login
+echo -e "${GREEN}Creating startup script for folder info display...${NC}"
+sudo tee /home/looper/.bash_profile > /dev/null <<'STARTUP'
+#!/bin/bash
+# Display folder info on login (only on TTY1 to avoid multiple displays)
+if [ "$(tty)" = "/dev/tty1" ] && [ -z "$FOLDER_INFO_DISPLAYED" ]; then
+    export FOLDER_INFO_DISPLAYED=1
+    if [ -f /home/looper/video_looper/video_looper.py ]; then
+        /usr/bin/python3 /home/looper/video_looper/video_looper.py --display-folder-info 2>/dev/null || true
+    fi
 fi
+STARTUP
+
+sudo chown looper:looper /home/looper/.bash_profile
+sudo chmod 644 /home/looper/.bash_profile
+echo -e "${GREEN}✓ Startup script created${NC}"
+
+# Reload systemd to apply autologin configuration
+sudo systemctl daemon-reload
+echo -e "${GREEN}✓ Systemd reloaded to apply autologin${NC}"
 
 # Check if running on Raspberry Pi
 if ! grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
@@ -124,8 +152,7 @@ sudo apt install -y \
     ffmpeg \
     python3-requests \
     python3-serial \
-    cec-utils \
-    python3-evdev 
+    cec-utils 
 
 sudo apt-get install -y pmount
 
@@ -210,7 +237,6 @@ sudo cp -f time_sync.py "$INSTALL_DIR/"
 sudo cp -f projector_controller.py "$INSTALL_DIR/"
 sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
-sudo cp -f keyboard_monitor.py "$INSTALL_DIR/"
 sudo cp -f constants.py "$INSTALL_DIR/"
 sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
@@ -218,7 +244,6 @@ sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
 sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 sudo chmod +x "$INSTALL_DIR/usb_sync.py"
-sudo chmod +x "$INSTALL_DIR/keyboard_monitor.py"
 sudo chmod +x "$INSTALL_DIR/constants.py"
 
 echo -e "${GREEN}Step 6: Setting up Python environment...${NC}"
@@ -230,8 +255,6 @@ if [ -f "$INSTALL_DIR/venv/bin/activate" ]; then
     echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
     # Use the virtual environment's pip directly instead of sourcing
     sudo -u looper bash -c "cd '$INSTALL_DIR' && ./venv/bin/pip install --upgrade pip"
-    # Install python-evdev in virtual environment (if not available via apt)
-    sudo -u looper bash -c "cd '$INSTALL_DIR' && ./venv/bin/pip install evdev" || echo -e "${YELLOW}⚠ Could not install evdev in venv, using system package${NC}"
 else
     echo -e "${YELLOW}⚠ Virtual environment creation failed, using system pip${NC}"
     pip3 install --upgrade pip

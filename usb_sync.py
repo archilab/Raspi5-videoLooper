@@ -134,6 +134,10 @@ class USBSync:
         if not folder_path.is_dir():
             return False
         
+        # Skip hidden folders (starting with '.')
+        if folder_path.name.startswith('.'):
+            return False
+        
         # Check folder name pattern
         match = re.match(FOLDER_NAME_PATTERN, folder_path.name)
         
@@ -152,6 +156,9 @@ class USBSync:
         # Check if folder contains at least one video file
         try:
             for file_path in folder_path.iterdir():
+                # Skip hidden files (starting with '.')
+                if file_path.name.startswith('.'):
+                    continue
                 if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
                     return True
         except (PermissionError, OSError):
@@ -174,6 +181,9 @@ class USBSync:
         
         try:
             for item in root_path.iterdir():
+                # Skip hidden folders (starting with '.')
+                if item.name.startswith('.'):
+                    continue
                 if item.is_dir() and self.is_valid_video_folder(item):
                     valid_folders[item.name] = item
         except (PermissionError, OSError) as e:
@@ -196,6 +206,9 @@ class USBSync:
         
         try:
             for item in folder_path.iterdir():
+                # Skip hidden files (starting with '.')
+                if item.name.startswith('.'):
+                    continue
                 if item.is_file():
                     files_dict[item.name] = item
         except (PermissionError, OSError) as e:
@@ -218,6 +231,9 @@ class USBSync:
         
         try:
             for item in folder_path.iterdir():
+                # Skip hidden files (starting with '.')
+                if item.name.startswith('.'):
+                    continue
                 if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
                     video_files.add(item.name.lower())
         except (PermissionError, OSError) as e:

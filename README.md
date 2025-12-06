@@ -18,10 +18,8 @@ This project creates an automated video looper system for Raspberry Pi 5 that us
 - **Automatic Startup**: Runs as a systemd service, starting automatically on boot
 - **Multiple Video Support**: Loops through all videos in active folders
 - **Graceful Switching**: Automatically switches between different video sets based on schedule
-- **Efficient Logging**: Minimal logging (errors and warnings only) to reduce SD card wear
+- **Comprehensive Logging**: Detailed logs for monitoring and debugging
 - **Easy Management**: Simple service commands for start/stop/restart
-- **Clean Codebase**: Centralized constants, improved code organization, and reduced duplication
-- **Keyboard Test Mode**: Press Ctrl+F1 to test all video folders (1 minute each with 30 second pauses)
 
 ## Folder Naming Convention
 
@@ -71,7 +69,7 @@ The installation script will:
 - Install VLC, Python dependencies, time synchronization tools, and CEC utilities
 - Configure NTP synchronization with multiple servers
 - Create necessary directories (`/home/looper/video_looper` and `/home/looper/videos`)
-- Copy all required files to appropriate locations (including all Python modules and constants)
+- Copy files to appropriate locations (including HDMI controller and USB sync modules)
 - Set up the systemd service
 - Configure permissions
 - Test the installation
@@ -105,8 +103,6 @@ If you prefer manual installation:
    sudo cp projector_controller.py /home/looper/video_looper/
    sudo cp hdmi_controller.py /home/looper/video_looper/
    sudo cp usb_sync.py /home/looper/video_looper/
-   sudo cp constants.py /home/looper/video_looper/
-   sudo cp config.conf /home/looper/video_looper/
    sudo cp video-looper.service /etc/systemd/system/
    ```
 
@@ -117,7 +113,6 @@ If you prefer manual installation:
    sudo chmod +x /home/looper/video_looper/projector_controller.py
    sudo chmod +x /home/looper/video_looper/hdmi_controller.py
    sudo chmod +x /home/looper/video_looper/usb_sync.py
-   sudo chmod +x /home/looper/video_looper/constants.py
    sudo chown -R looper:looper /home/looper/video_looper
    sudo chown -R looper:looper /home/looper/videos
    ```
@@ -623,8 +618,6 @@ You can customize the videos directory and log file location:
 python3 video_looper.py --videos-path /custom/videos/path --log-file /custom/log/path
 ```
 
-**Note**: Default paths are defined in `constants.py`. To change defaults permanently, edit `constants.py` before installation, or use command-line arguments to override at runtime.
-
 ### Service Configuration
 
 The systemd service file (`/etc/systemd/system/video-looper.service`) runs as the `looper` user. The service file can be modified to:
@@ -683,17 +676,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
    - Verify HDMI connection is active
    - Check if display supports CEC (enabled in display settings)
 
-8. **Keyboard test mode not working**:
-   - Check if looper user is in input group: `groups looper` (should include `input`)
-   - If not, add manually: `sudo usermod -aG input looper` (requires logout/login or reboot)
-   - Verify keyboard device permissions: `ls -la /dev/input/event*`
-   - Check if python-evdev is installed: `python3 -c "import evdev; print('OK')"`
-   - Test keyboard detection: `python3 -c "from keyboard_monitor import KeyboardMonitor; m = KeyboardMonitor(lambda: None); print('Available:', m.is_available())"`
-   - Check logs for keyboard errors: `sudo journalctl -u video-looper | grep -i keyboard`
-   - Ensure keyboard is connected and detected: `cat /proc/bus/input/devices | grep -i keyboard`
-   - If using USB keyboard, verify it's detected: `lsusb | grep -i keyboard`
-
-9. **USB sync issues**:
+8. **USB sync issues**:
    - Verify USB drive is mounted: `mount | grep -i usb`
    - Check mount points: `ls -la /media/usb0 /media/usb1 /media/usb2 /media/usb3`
    - Check if usbmount is installed: `dpkg -l | grep usbmount` (optional, uses udev if not available)
@@ -713,7 +696,7 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
      - Manually test mount: `sudo mount /dev/sda1 /media/usb0`
      - Check mount script manually: `sudo /usr/local/bin/usb-mount.sh sda1`
 
-10. **RTC time setting issues**:
+9. **RTC time setting issues**:
    - Verify RTC time file exists on USB: `ls /media/looper/rtc_time.txt`
    - Check time file format: `cat /media/looper/rtc_time.txt`
    - Test RTC time setting: `python3 time_sync.py --set-rtc-from-file /media/looper/rtc_time.txt`
@@ -781,12 +764,10 @@ For optimal performance:
 ```
 Raspi5-videoLooper/
 ├── video_looper.py          # Main Python script
-├── constants.py             # Centralized constants (paths, formats, defaults)
 ├── time_sync.py             # Time synchronization module
 ├── projector_controller.py  # Projector control module
 ├── hdmi_controller.py       # HDMI display control module (CEC)
 ├── usb_sync.py              # USB drive synchronization module
-├── keyboard_monitor.py      # Keyboard input monitoring for test mode
 ├── video-looper.service     # Systemd service file
 ├── install.sh              # Installation script
 ├── setup_examples.sh        # Example folder structure setup
@@ -796,15 +777,6 @@ Raspi5-videoLooper/
 ├── README.md               # This documentation
 └── .gitattributes          # Git configuration
 ```
-
-### Module Dependencies
-
-The modules have the following dependencies:
-- `video_looper.py` imports from: `constants`, `time_sync`, `projector_controller`, `hdmi_controller`, `usb_sync`, `keyboard_monitor`
-- `projector_controller.py` imports from: `constants`
-- `usb_sync.py` imports from: `constants`
-- `keyboard_monitor.py` imports from: `constants`
-- All modules use centralized constants from `constants.py` to avoid duplication
 
 ## System Requirements
 
@@ -822,19 +794,6 @@ The modules have the following dependencies:
 - Log files are accessible only to the looper user
 - No network services exposed
 - The looper user is automatically created during installation if it doesn't exist
-- Minimal logging (WARNING level) reduces disk writes and improves SD card longevity
-
-## Code Organization
-
-The codebase follows clean code principles:
-
-- **Centralized Constants**: All constants (paths, formats, defaults) are defined in `constants.py`
-- **Reduced Duplication**: Common logic is centralized to avoid code duplication
-- **Minimal Logging**: Only errors and warnings are logged to reduce SD card wear on Raspberry Pi
-- **Clear Module Structure**: Each module has a single, well-defined responsibility
-- **Type Safety**: Constants use appropriate types (frozen sets, etc.) for better reliability
-
-To modify default values (video formats, paths, timing constants), edit `constants.py` before installation or reinstall after changes.
 
 ## Support
 

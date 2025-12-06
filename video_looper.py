@@ -18,13 +18,11 @@ from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 from hdmi_controller import HDMIController
 from usb_sync import USBSync
-from keyboard_monitor import KeyboardMonitor
 from constants import (
     DEFAULT_VIDEOS_PATH, DEFAULT_LOG_FILE, VIDEO_EXTENSIONS,
     PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT,
-    CHECK_INTERVAL, HDMI_WAKE_DELAY, TEST_PLAY_DURATION, TEST_PAUSE_DURATION
+    CHECK_INTERVAL, HDMI_WAKE_DELAY
 )
-import threading
 
 class VideoLooper:
     def __init__(self, videos_path=None, log_file=None):
@@ -39,8 +37,6 @@ class VideoLooper:
         self.current_process = None
         self.current_folder = None
         self.running = True
-        self.test_mode_active = False
-        self.keyboard_monitor = None
         
         # Setup logging
         self.setup_logging()
@@ -75,8 +71,6 @@ class VideoLooper:
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         self.running = False
-        if self.keyboard_monitor:
-            self.keyboard_monitor.stop()
         self.stop_video(standby_hdmi=True)
         self.time_sync.stop_background_sync()
         self.projector.disconnect()
@@ -134,10 +128,10 @@ class VideoLooper:
         return True
     
     def get_video_files(self, folder_path):
-        """Get all video files from a folder"""
+        """Get all video files from a folder, ignoring hidden files (starting with '.')"""
         video_files = [
             f for f in folder_path.iterdir()
-            if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+            if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS and not f.name.startswith('.')
         ]
         return sorted(video_files)
     
@@ -199,8 +193,9 @@ class VideoLooper:
     
     def get_all_valid_folders(self):
         """
-        Get all valid video folders regardless of schedule
-        Returns list of all folders matching naming pattern with video files
+        Get all valid video folders regardless of schedule, sorted chronologically
+        Returns list of tuples: (folder_path, video_files)
+        Ignores folders and files that start with '.'
         """
         if not self.videos_path.exists():
             return []
@@ -209,6 +204,10 @@ class VideoLooper:
         
         for folder_path in self.videos_path.iterdir():
             if folder_path.is_dir():
+                # Skip hidden folders (starting with '.')
+                if folder_path.name.startswith('.'):
+                    continue
+                
                 # Check if folder name matches pattern
                 schedule = self.parse_folder_name(folder_path.name)
                 if schedule:
@@ -216,10 +215,105 @@ class VideoLooper:
                     if video_files:
                         valid_folders.append((folder_path, video_files))
         
-        # Sort by start date (most recent first)
-        valid_folders.sort(key=lambda x: self.parse_folder_name(x[0].name)['start_date'], reverse=True)
+        # Sort by start date (ascending - chronological order)
+        valid_folders.sort(key=lambda x: self.parse_folder_name(x[0].name)['start_date'])
         
         return valid_folders
+    
+    def display_folder_info_on_screen(self):
+        """Display folder information on HDMI screen"""
+        try:
+            # Get all valid folders
+            all_folders = self.get_all_valid_folders()
+            
+            # Prepare text content
+            lines = []
+            lines.append("")
+            lines.append("Raspberry Pi Video Looper - System Information")
+            lines.append("=" * 60)
+            lines.append("")
+            
+            now = datetime.now()
+            current_time = now.strftime('%Y-%m-%d %H:%M:%S')
+            lines.append(f"Current Date/Time: {current_time}")
+            lines.append("")
+            
+            if not all_folders:
+                lines.append("No valid video loop folders found.")
+            else:
+                lines.append(f"Found {len(all_folders)} valid loop folder(s) (chronological order):")
+                lines.append("")
+                
+                for idx, (folder_path, video_files) in enumerate(all_folders, 1):
+                    folder_name = folder_path.name
+                    schedule = self.parse_folder_name(folder_name)
+                    
+                    lines.append(f"[{idx}] {folder_name}")
+                    
+                    if schedule:
+                        start_date = schedule['start_date'].strftime('%Y-%m-%d')
+                        end_date = schedule['end_date'].strftime('%Y-%m-%d')
+                        start_time = schedule['start_time'].strftime('%H:%M')
+                        end_time = schedule['end_time'].strftime('%H:%M')
+                        lines.append(f"     Schedule: {start_date} to {end_date}, {start_time} to {end_time}")
+                    else:
+                        lines.append("     Schedule: Unknown")
+                    
+                    lines.append(f"     Videos ({len(video_files)} file(s)):")
+                    for video_file in video_files:
+                        try:
+                            file_size = video_file.stat().st_size
+                            size_mb = file_size / (1024 * 1024)
+                            size_str = f"{size_mb:.1f} MB"
+                        except Exception:
+                            size_str = "unknown size"
+                        lines.append(f"       - {video_file.name} ({size_str})")
+                    
+                    lines.append("")
+            
+            lines.append("=" * 60)
+            lines.append("")
+            
+            # Display on console/TTY
+            text = "\n".join(lines)
+            print(text, flush=True)
+            
+            # Write directly to TTY1 (main console, usually shows on HDMI)
+            try:
+                tty1_path = '/dev/tty1'
+                if os.path.exists(tty1_path):
+                    with open(tty1_path, 'w') as tty1:
+                        # Clear screen using ANSI escape codes
+                        tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
+                        tty1.write(text)
+                        tty1.flush()
+            except (PermissionError, OSError) as e:
+                self.logger.error(f"Could not write to TTY1: {e}")
+            
+            # Keep the information visible for 20 seconds
+            display_duration = 20  # seconds
+            
+            for remaining in range(display_duration, 0, -1):
+                # Refresh display every 2 seconds to keep it visible
+                if remaining % 2 == 0 or remaining <= 5:
+                    try:
+                        tty1_path = '/dev/tty1'
+                        if os.path.exists(tty1_path):
+                            with open(tty1_path, 'w') as tty1:
+                                # Clear screen using ANSI escape codes
+                                tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
+                                tty1.write(text)
+                                if remaining <= 5:
+                                    countdown_msg = f"\n\nStarting video loop in {remaining} second(s)...\n"
+                                    tty1.write(countdown_msg)
+                                tty1.flush()
+                    except (PermissionError, OSError):
+                        pass
+                
+                time.sleep(1)
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying folder info: {e}")
     
     def start_video(self, video_files, folder_path):
         """Start VLC with video files in loop mode and control projector"""
@@ -268,52 +362,6 @@ class VideoLooper:
             self.logger.error(traceback.format_exc())
             return False
     
-    def start_video_timed(self, video_files, folder_path, duration):
-        """
-        Start VLC with video files for a limited duration (for test mode)
-        Args:
-            video_files: List of video file paths
-            folder_path: Path to folder containing videos
-            duration: Duration in seconds to play
-        Returns:
-            subprocess.Popen object if successful, None otherwise
-        """
-        if not video_files:
-            return None
-        
-        if self.has_projector_config(folder_path):
-            self.load_projector_config(folder_path)
-            if self.projector.config.get('enable_projector', False):
-                if not self.projector.connect():
-                    self.logger.error("Failed to connect to projector")
-                elif not self.projector.start_projector():
-                    self.logger.error("Failed to start projector")
-        
-        # Create VLC command without --loop for timed playback
-        vlc_cmd = [
-            'cvlc',
-            '--intf', 'dummy',
-            '--fullscreen',
-            '--no-osd',
-            '--no-audio',
-            '--quiet',
-            '--run-time', str(duration),  # Limit playback duration
-        ]
-        
-        # Add all video files to the command
-        vlc_cmd.extend([str(f) for f in video_files])
-        
-        try:
-            process = subprocess.Popen(
-                vlc_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return process
-        except Exception as e:
-            self.logger.error(f"Failed to start timed video: {e}")
-            return None
-    
     def stop_video(self, standby_hdmi=False):
         """
         Stop the current video playback and projector
@@ -346,99 +394,6 @@ class VideoLooper:
                     self.logger.error("Failed to put HDMI in standby")
         
         self.current_folder = None
-    
-    def _on_test_key_triggered(self):
-        """Callback when Ctrl+F1 is detected"""
-        if self.test_mode_active:
-            return
-        
-        # Start test mode in separate thread to avoid blocking
-        test_thread = threading.Thread(target=self.run_test_mode, daemon=True)
-        test_thread.start()
-    
-    def run_test_mode(self):
-        """
-        Run test mode: play all valid folders for 1 minute each with 30 second pauses
-        """
-        self.test_mode_active = True
-        
-        # Get all valid folders
-        all_folders = self.get_all_valid_folders()
-        
-        if not all_folders:
-            self.logger.error("No valid video folders found for test mode")
-            self.test_mode_active = False
-            return
-        
-        self.logger.error(f"Starting test mode: {len(all_folders)} folder(s) to test")
-        print(f"\n=== TEST MODE STARTED ===", flush=True)
-        print(f"Testing {len(all_folders)} folder(s), 1 minute each with 30 second pauses\n", flush=True)
-        
-        # Interrupt current playback if active
-        if self.current_process:
-            self.stop_video(standby_hdmi=False)
-        
-        # Wake HDMI display
-        if self.hdmi.is_available():
-            self.hdmi.wake_hdmi()
-            time.sleep(HDMI_WAKE_DELAY)
-        
-        # Test each folder
-        for idx, (folder_path, video_files) in enumerate(all_folders, 1):
-            folder_name = folder_path.name
-            self.logger.error(f"Testing folder {idx}/{len(all_folders)}: {folder_name}")
-            
-            # Print folder name to terminal
-            print(f"\n[{idx}/{len(all_folders)}] Testing folder: {folder_name}", flush=True)
-            
-            # Load projector config if available
-            if self.has_projector_config(folder_path):
-                self.load_projector_config(folder_path)
-                if self.projector.config.get('enable_projector', False):
-                    if not self.projector.connect():
-                        self.logger.error("Failed to connect to projector")
-                    elif not self.projector.start_projector():
-                        self.logger.error("Failed to start projector")
-            
-            # Start video playback for TEST_PLAY_DURATION
-            process = self.start_video_timed(video_files, folder_path, TEST_PLAY_DURATION)
-            
-            if process:
-                # Wait for duration or until process ends
-                try:
-                    process.wait(timeout=TEST_PLAY_DURATION + 5)
-                except subprocess.TimeoutExpired:
-                    # Kill if still running after duration
-                    process.kill()
-                    process.wait()
-                except Exception as e:
-                    self.logger.error(f"Error waiting for test video: {e}")
-                    try:
-                        process.kill()
-                        process.wait()
-                    except Exception:
-                        pass
-            
-            # Stop projector if was started
-            if self.has_projector_config(folder_path):
-                if self.projector.config.get('enable_projector', False):
-                    if not self.projector.stop_projector():
-                        self.logger.error("Failed to stop projector")
-                    self.projector.disconnect()
-            
-            # Pause between folders (except after last folder)
-            if idx < len(all_folders):
-                time.sleep(TEST_PAUSE_DURATION)
-        
-        # Cleanup after test mode
-        self.clear_display()
-        if self.hdmi.is_available():
-            time.sleep(1)
-            self.hdmi.standby_hdmi()
-        
-        print(f"\n=== TEST MODE COMPLETED ===\n", flush=True)
-        self.logger.error("Test mode completed")
-        self.test_mode_active = False
     
     def clear_display(self):
         """Clear the HDMI display/framebuffer to show blank screen"""
@@ -505,22 +460,9 @@ class VideoLooper:
         self.time_sync.sync_time()
         self.time_sync.start_background_sync()
         
-        # Initialize and start keyboard monitor
-        try:
-            self.keyboard_monitor = KeyboardMonitor(self._on_test_key_triggered, self.log_file)
-            if self.keyboard_monitor.is_available():
-                self.keyboard_monitor.start()
-        except Exception as e:
-            self.logger.error(f"Failed to start keyboard monitor: {e}")
-        
         current_folder = None
         while self.running:
             try:
-                # Skip normal playback if test mode is active
-                if self.test_mode_active:
-                    time.sleep(CHECK_INTERVAL)
-                    continue
-                
                 active_folder_info = self.find_active_folder()
                 
                 if active_folder_info:
@@ -548,9 +490,6 @@ class VideoLooper:
                 self.logger.error(f"Error in main loop: {e}")
                 time.sleep(60)
         
-        # Cleanup
-        if self.keyboard_monitor:
-            self.keyboard_monitor.stop()
         self.stop_video(standby_hdmi=True)
         self.time_sync.stop_background_sync()
 
@@ -583,6 +522,8 @@ def main():
                        help='Test USB sync (show what would be synced without copying)')
     parser.add_argument('--usb-path', default=None,
                        help='Path to USB drive to sync from (optional, auto-detects if not specified)')
+    parser.add_argument('--display-folder-info', action='store_true',
+                       help='Display folder information on screen for 20 seconds')
     
     args = parser.parse_args()
     
@@ -714,6 +655,11 @@ def main():
             print(f"✗ USB sync failed: {e}")
             import traceback
             traceback.print_exc()
+        return
+    
+    elif args.display_folder_info:
+        # Display folder information on screen
+        looper.display_folder_info_on_screen()
         return
     
     looper.run()

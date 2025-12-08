@@ -1,7 +1,7 @@
 [Unit]
 Description=Raspberry Pi Video Looper
-After=network.target local-fs.target
-Wants=network-online.target
+After=network-online.target systemd-timesyncd.service time-sync.target local-fs.target
+Wants=network-online.target systemd-timesyncd.service
 
 [Service]
 Type=simple
@@ -9,6 +9,9 @@ User=looper
 Group=looper
 WorkingDirectory=/home/looper/video_looper
 ExecStart=/usr/bin/python3 /home/looper/video_looper/video_looper.py
+CapabilityBoundingSet=CAP_SYS_TIME CAP_WAKE_ALARM
+AmbientCapabilities=CAP_SYS_TIME CAP_WAKE_ALARM
+NoNewPrivileges=no
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -19,6 +22,7 @@ Environment=DISPLAY=:0
 Environment=HOME=/home/looper
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=QT_QPA_PLATFORM=xcb
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target

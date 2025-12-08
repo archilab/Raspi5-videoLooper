@@ -152,7 +152,9 @@ sudo apt install -y \
     ffmpeg \
     python3-requests \
     python3-serial \
-    cec-utils 
+    cec-utils \
+    util-linux \
+    util-linux-extra  
 
 sudo apt-get install -y pmount
 
@@ -264,6 +266,10 @@ echo -e "${GREEN}Step 7: Configuring time synchronization...${NC}"
 # Enable systemd-timesyncd for automatic NTP sync (already included in Raspberry Pi OS)
 sudo systemctl enable systemd-timesyncd
 sudo systemctl start systemd-timesyncd
+
+# Ensure util-linux (hwclock) is available
+sudo apt-get update -y
+sudo apt-get install -y util-linux
 
 # Configure NTP servers
 sudo tee /etc/systemd/timesyncd.conf > /dev/null <<EOF

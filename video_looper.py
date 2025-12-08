@@ -61,12 +61,12 @@ class VideoLooper:
         signal.signal(signal.SIGTERM, self.signal_handler)
     
     def setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration - minimal logging to reduce SD card wear"""
         logging.basicConfig(
-            level=logging.WARNING,
-            format='%(asctime)s - %(levelname)s - %(message)s',
+            level=logging.ERROR,  # Only log errors
+            format='%(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(self.log_file)
+                logging.StreamHandler(sys.stderr)  # No file writes to reduce SD card wear
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -303,155 +303,314 @@ class VideoLooper:
             self.logger.error(f"Error displaying folder info: {e}")
             return None
     
-    def get_char_non_blocking(self, timeout=0.1):
-        """Get a single character from TTY with timeout"""
+    def _setup_terminal_input(self):
+        """Setup terminal for raw input"""
         try:
-            # Try reading from /dev/tty1 (main console)
-            tty_path = '/dev/tty1'
-            if os.path.exists(tty_path):
-                # Use select to check if input is available
-                tty_fd = os.open(tty_path, os.O_RDONLY | os.O_NONBLOCK)
-                try:
-                    if select.select([tty_fd], [], [], timeout)[0]:
-                        char = os.read(tty_fd, 1).decode('utf-8', errors='ignore')
-                        return char
-                finally:
-                    os.close(tty_fd)
+            if sys.stdin.isatty():
+                self.old_settings = termios.tcgetattr(sys.stdin)
+                tty.setraw(sys.stdin.fileno())
+                return True
         except Exception:
             pass
-        return None
+        return False
+    
+    def _restore_terminal_input(self):
+        """Restore terminal settings"""
+        try:
+            if hasattr(self, 'old_settings') and sys.stdin.isatty():
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+        except Exception:
+            pass
+    
+    def get_char_blocking(self, timeout=None):
+        """Get a single character with optional timeout - blocking"""
+        try:
+            if timeout:
+                ready, _, _ = select.select([sys.stdin], [], [], timeout)
+                if not ready:
+                    return None
+            return sys.stdin.read(1)
+        except Exception:
+            return None
     
     def display_boot_menu(self):
-        """Display boot menu UI and handle user selection"""
+        """Display boot menu UI and handle user selection - stable version"""
         try:
             menu_timeout = 20  # seconds to wait for input
             start_time = time.time()
+            last_countdown_update = 0
             
-            while True:
-                # Build menu text
-                lines = []
-                lines.append("")
-                lines.append("=" * 60)
-                lines.append("Video Looper - Boot Menu")
-                lines.append("=" * 60)
-                lines.append("")
-                lines.append("Select an option:")
-                lines.append("")
-                lines.append("  1. Set RTC Time Manually")
-                lines.append("  2. Sync RTC with NTP")
-                lines.append("  3. Start Demo Mode")
-                lines.append("")
-                lines.append("  Press 1, 2, 3, or Enter to continue...")
-                lines.append("")
+            # Setup terminal for raw input
+            terminal_setup = self._setup_terminal_input()
+            
+            try:
+                # Show menu once
+                self._show_menu_screen(menu_timeout)
                 
-                remaining = int(menu_timeout - (time.time() - start_time))
-                if remaining > 0:
-                    lines.append(f"  Auto-continuing in {remaining} second(s)...")
-                else:
-                    lines.append("  Auto-continuing...")
-                lines.append("")
-                
-                text = "\n".join(lines)
-                
-                # Display on TTY1
-                try:
-                    tty1_path = '/dev/tty1'
-                    if os.path.exists(tty1_path):
-                        with open(tty1_path, 'w') as tty1:
-                            tty1.write('\033[2J\033[H')
-                            tty1.write(text)
-                            tty1.flush()
-                except (PermissionError, OSError):
-                    pass
-                
-                # Check for input
-                if time.time() - start_time >= menu_timeout:
-                    return None  # Timeout, continue normal operation
-                
-                char = self.get_char_non_blocking(0.5)
-                
-                if char == '1':
-                    self.handle_manual_time_setting()
-                    return None
-                elif char == '2':
-                    self.handle_ntp_sync()
-                    return None
-                elif char == '3':
-                    return 'demo'  # Return demo mode flag
-                elif char == '\n' or char == '\r':
-                    return None  # Enter pressed, continue
-                
-                time.sleep(0.1)
+                # Wait for input with periodic countdown updates
+                while True:
+                    elapsed = time.time() - start_time
+                    remaining = int(menu_timeout - elapsed)
+                    
+                    # Update countdown only once per second to avoid flickering
+                    if int(time.time()) != int(last_countdown_update):
+                        self._show_menu_screen(remaining)
+                        last_countdown_update = time.time()
+                    
+                    # Check timeout
+                    if elapsed >= menu_timeout:
+                        self._restore_terminal_input()
+                        return None  # Timeout, continue normal operation
+                    
+                    # Wait for input with 1 second timeout
+                    char = self.get_char_blocking(timeout=1.0)
+                    
+                    if char:
+                        # Stop countdown immediately
+                        self._restore_terminal_input()
+                        
+                        # Process selection
+                        if char == '1':
+                            self._show_feedback("Option 1: Starting Demo Mode...")
+                            time.sleep(0.5)
+                            return 'demo'
+                        elif char == '2':
+                            self._show_feedback("Option 2: Setting RTC Time...")
+                            time.sleep(0.5)
+                            self.handle_manual_time_setting()
+                            return None
+                        elif char == '\n' or char == '\r':
+                            return None  # Enter pressed, continue
+                        else:
+                            # Invalid key - show error and restart
+                            self._show_feedback(f"Invalid option: {char}. Press 1, 2, or Enter...")
+                            time.sleep(1.5)
+                            start_time = time.time()  # Reset timer
+                            last_countdown_update = 0
+                            self._show_menu_screen(menu_timeout)
+                            terminal_setup = self._setup_terminal_input()
+                            
+            finally:
+                self._restore_terminal_input()
                 
         except Exception as e:
             self.logger.error(f"Error in boot menu: {e}")
+            self._restore_terminal_input()
             return None
     
-    def handle_manual_time_setting(self):
-        """Handle manual RTC time setting"""
+    def _show_menu_screen(self, remaining=None):
+        """Display menu screen without flickering"""
         try:
-            # Show input prompt
-            prompt_lines = []
-            prompt_lines.append("")
-            prompt_lines.append("=" * 60)
-            prompt_lines.append("Set RTC Time Manually")
-            prompt_lines.append("=" * 60)
-            prompt_lines.append("")
-            prompt_lines.append("Enter time in format: YYYY-MM-DD HH:MM:SS")
-            prompt_lines.append("Example: 2024-01-15 14:30:00")
-            prompt_lines.append("")
-            prompt_lines.append("Time: ")
+            tty1_path = '/dev/tty1'
+            if os.path.exists(tty1_path):
+                with open(tty1_path, 'w') as tty1:
+                    # Clear screen and reset cursor
+                    tty1.write('\033[2J\033[H\033[0m')  # Clear, home, reset formatting
+                    tty1.write("\n")
+                    tty1.write("=" * 60 + "\n")
+                    tty1.write("Video Looper - Boot Menu\n")
+                    tty1.write("=" * 60 + "\n")
+                    tty1.write("\n")
+                    tty1.write("Select an option:\n")
+                    tty1.write("\n")
+                    tty1.write("  1. Start Demo Mode\n")
+                    tty1.write("  2. Set RTC Time\n")
+                    tty1.write("\n")
+                    tty1.write("  Press 1, 2, or Enter to continue...\n")
+                    tty1.write("\n")
+                    
+                    if remaining is not None and remaining > 0:
+                        tty1.write(f"  Auto-continuing in {remaining} second(s)...\n")
+                    elif remaining is not None:
+                        tty1.write("  Auto-continuing...\n")
+                    
+                    tty1.write("\n")
+                    tty1.flush()
+        except (PermissionError, OSError):
+            pass
+    
+    def _show_feedback(self, message):
+        """Show feedback message"""
+        try:
+            tty1_path = '/dev/tty1'
+            if os.path.exists(tty1_path):
+                with open(tty1_path, 'w') as tty1:
+                    # Clear screen and reset formatting
+                    tty1.write('\033[2J\033[H\033[0m')
+                    tty1.write("Video Looper - Boot Menu\n")
+                    tty1.write("=" * 60 + "\n\n")
+                    tty1.write(f"{message}\n")
+                    tty1.flush()
+        except (PermissionError, OSError):
+            pass
+    
+    def _get_numeric_input(self, prompt_text, min_value, max_value, timeout=60):
+        """Get numeric input with validation - stable version"""
+        start_time = time.time()
+        input_buffer = ""
+        terminal_setup = self._setup_terminal_input()
+        
+        try:
+            # Show prompt once
+            self._show_numeric_prompt(prompt_text, input_buffer)
             
-            prompt_text = "\n".join(prompt_lines)
+            while time.time() - start_time < timeout:
+                # Read character with timeout
+                char = self.get_char_blocking(timeout=0.5)
+                
+                if char is None:
+                    # Timeout - update display occasionally
+                    if int(time.time()) % 2 == 0:  # Update every 2 seconds
+                        self._show_numeric_prompt(prompt_text, input_buffer)
+                    continue
+                
+                if char == '\n' or char == '\r':
+                    # Enter pressed
+                    if input_buffer:
+                        try:
+                            value = int(input_buffer)
+                            if min_value <= value <= max_value:
+                                self._show_numeric_prompt(prompt_text, input_buffer, f"✓ Accepted: {value}")
+                                time.sleep(0.5)
+                                return value
+                            else:
+                                # Invalid range
+                                self._show_numeric_prompt(prompt_text, "", f"✗ Error: Must be {min_value}-{max_value}. Press Enter...")
+                                # Wait for Enter
+                                while True:
+                                    char = self.get_char_blocking(timeout=1.0)
+                                    if char == '\n' or char == '\r':
+                                        break
+                                    if time.time() - start_time >= timeout:
+                                        return None
+                                input_buffer = ""
+                                start_time = time.time()
+                                self._show_numeric_prompt(prompt_text, input_buffer)
+                        except ValueError:
+                            input_buffer = ""
+                            self._show_numeric_prompt(prompt_text, input_buffer)
+                    else:
+                        return None
+                elif char == '\x7f' or char == '\b' or char == '\x08':  # Backspace
+                    input_buffer = input_buffer[:-1] if input_buffer else ""
+                    self._show_numeric_prompt(prompt_text, input_buffer)
+                elif char.isdigit():
+                    input_buffer += char
+                    self._show_numeric_prompt(prompt_text, input_buffer)
+                    # Auto-submit if we have enough digits and it's valid
+                    if len(input_buffer) >= len(str(max_value)):
+                        try:
+                            value = int(input_buffer)
+                            if min_value <= value <= max_value:
+                                self._show_numeric_prompt(prompt_text, input_buffer, f"✓ Auto-accepted: {value}")
+                                time.sleep(0.5)
+                                return value
+                        except ValueError:
+                            pass
+                elif char == '\x03':  # Ctrl+C
+                    return None
             
-            # Display prompt
+            return None
+        finally:
+            self._restore_terminal_input()
+    
+    def _show_numeric_prompt(self, prompt_text, input_buffer, status=""):
+        """Show numeric input prompt"""
+        try:
+            tty1_path = '/dev/tty1'
+            if os.path.exists(tty1_path):
+                with open(tty1_path, 'w') as tty1:
+                    # Clear screen and reset formatting
+                    tty1.write('\033[2J\033[H\033[0m')
+                    tty1.write(prompt_text)
+                    if input_buffer:
+                        tty1.write(f"\n\nInput: {input_buffer}")
+                    if status:
+                        tty1.write(f"\n{status}")
+                    tty1.flush()
+        except (PermissionError, OSError):
+            pass
+    
+    def handle_manual_time_setting(self):
+        """Handle manual RTC time setting - step-by-step entry"""
+        try:
+            # Get Year
+            year = self._get_numeric_input(
+                "Set RTC Time\n" + "=" * 60 + "\n\nEnter Year (e.g., 2024):\n",
+                2000, 2099, timeout=60
+            )
+            if year is None:
+                self.show_message("Input timeout. Cancelled.", 3)
+                return
+            
+            # Get Month
+            month = self._get_numeric_input(
+                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\n\nEnter Month (1-12):\n",
+                1, 12, timeout=60
+            )
+            if month is None:
+                self.show_message("Input timeout. Cancelled.", 3)
+                return
+            
+            # Get Day (validate based on month)
+            max_day = 31
+            if month in [4, 6, 9, 11]:
+                max_day = 30
+            elif month == 2:
+                # Simple check - assume 29 for leap years
+                max_day = 29
+            
+            day = self._get_numeric_input(
+                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\n\nEnter Day (1-{max_day}):\n",
+                1, max_day, timeout=60
+            )
+            if day is None:
+                self.show_message("Input timeout. Cancelled.", 3)
+                return
+            
+            # Get Hour
+            hour = self._get_numeric_input(
+                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\nDay: {day}\n\nEnter Hour (0-23):\n",
+                0, 23, timeout=60
+            )
+            if hour is None:
+                self.show_message("Input timeout. Cancelled.", 3)
+                return
+            
+            # Get Minute
+            minute = self._get_numeric_input(
+                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\nDay: {day}\nHour: {hour}\n\nEnter Minute (0-59):\n",
+                0, 59, timeout=60
+            )
+            if minute is None:
+                self.show_message("Input timeout. Cancelled.", 3)
+                return
+            
+            # Format time string
+            time_str = f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:00"
+            
+            # Show confirmation
             try:
                 tty1_path = '/dev/tty1'
                 if os.path.exists(tty1_path):
                     with open(tty1_path, 'w') as tty1:
-                        tty1.write('\033[2J\033[H')
-                        tty1.write(prompt_text)
+                        # Clear screen and reset formatting
+                        tty1.write('\033[2J\033[H\033[0m')
+                        tty1.write("Set RTC Time\n")
+                        tty1.write("=" * 60 + "\n\n")
+                        tty1.write(f"Setting time to: {time_str}\n")
+                        tty1.write("\nWriting to RTC...\n")
                         tty1.flush()
             except (PermissionError, OSError):
                 pass
             
-            # Read input from stdin (with timeout)
-            time_str = None
-            input_timeout = 60
-            start_time = time.time()
-            
-            input_buffer = ""
-            while time.time() - start_time < input_timeout:
-                char = self.get_char_non_blocking(0.5)
-                if char:
-                    if char == '\n' or char == '\r':
-                        time_str = input_buffer.strip()
-                        break
-                    elif char == '\x7f' or char == '\b':  # Backspace
-                        input_buffer = input_buffer[:-1] if input_buffer else ""
-                    elif char.isprintable():
-                        input_buffer += char
-                    
-                    # Update display with current input
-                    try:
-                        tty1_path = '/dev/tty1'
-                        if os.path.exists(tty1_path):
-                            with open(tty1_path, 'w') as tty1:
-                                tty1.write('\033[2J\033[H')
-                                tty1.write(prompt_text)
-                                tty1.write(input_buffer)
-                                tty1.flush()
-                    except (PermissionError, OSError):
-                        pass
-            
-            if time_str:
-                # Set time
-                if self.time_sync.set_time_manually(time_str):
-                    self.show_message("Time set successfully!", 3)
-                else:
-                    self.show_message("Failed to set time. Please check format.", 5)
+            # Set time (this will set system time and write to RTC)
+            if self.time_sync.set_time_manually(time_str):
+                self.show_message(f"Time set successfully!\n{time_str}\nWritten to RTC.", 3)
             else:
-                self.show_message("Input timeout. Returning to menu...", 3)
+                # Log the error for debugging
+                self.logger.error(f"Failed to set time: {time_str}")
+                self.show_message(f"Failed to set time: {time_str}\nCheck logs for details.", 5)
                 
         except Exception as e:
             self.logger.error(f"Error in manual time setting: {e}")
@@ -597,8 +756,6 @@ class VideoLooper:
             return True
         except Exception as e:
             self.logger.error(f"Failed to start VLC: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
             return False
     
     def start_video_timed(self, video_files, folder_path, duration=60):
@@ -986,8 +1143,6 @@ def main():
                     print("✗ No USB drives with valid video folders found")
         except Exception as e:
             print(f"✗ USB sync failed: {e}")
-            import traceback
-            traceback.print_exc()
         return
     
     elif args.display_folder_info:

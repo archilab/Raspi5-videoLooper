@@ -262,28 +262,42 @@ else
     pip3 install --upgrade pip
 fi
 
-echo -e "${GREEN}Step 7: Configuring time synchronization...${NC}"
-# Enable systemd-timesyncd for automatic NTP sync (already included in Raspberry Pi OS)
-sudo systemctl enable systemd-timesyncd
-sudo systemctl start systemd-timesyncd
+echo -e "${GREEN}Step 7: Configuring RTC-only time synchronization (NTP disabled)...${NC}"
+
+# Disable systemd-timesyncd (NTP)
+echo -e "${GREEN}Disabling NTP (systemd-timesyncd)...${NC}"
+sudo systemctl stop systemd-timesyncd 2>/dev/null || true
+sudo systemctl disable systemd-timesyncd 2>/dev/null || true
+sudo timedatectl set-ntp false 2>/dev/null || true
+echo -e "${GREEN}✓ NTP disabled${NC}"
 
 # Ensure util-linux (hwclock) is available
 sudo apt-get update -y
 sudo apt-get install -y util-linux
 
-# Configure NTP servers
-sudo tee /etc/systemd/timesyncd.conf > /dev/null <<EOF
-[Time]
-NTP=pool.ntp.org time.google.com time.cloudflare.com
-FallbackNTP=time.nist.gov
-PollIntervalMinSec=32
-PollIntervalMaxSec=2048
-EOF
+# Set capabilities on hwclock so unprivileged user can use it
+echo -e "${GREEN}Setting capabilities on hwclock for unprivileged access...${NC}"
+HWCLOCK_PATH=$(which hwclock 2>/dev/null || echo "/usr/sbin/hwclock")
+if [ -f "$HWCLOCK_PATH" ]; then
+    sudo setcap cap_sys_time+ep "$HWCLOCK_PATH"
+    echo -e "${GREEN}✓ Capabilities set on $HWCLOCK_PATH${NC}"
+else
+    # Try alternative locations
+    for path in /usr/sbin/hwclock /usr/bin/hwclock /sbin/hwclock /bin/hwclock; do
+        if [ -f "$path" ]; then
+            sudo setcap cap_sys_time+ep "$path"
+            echo -e "${GREEN}✓ Capabilities set on $path${NC}"
+            break
+        fi
+    done
+fi
 
-# Restart timesyncd to apply new configuration
-sudo systemctl restart systemd-timesyncd
+# Configure system to use RTC only
+echo -e "${GREEN}Configuring system for RTC-only mode...${NC}"
+# Ensure RTC is set to local time (not UTC) if needed
+# This is typically already configured on Raspberry Pi OS
 
-echo -e "${GREEN}✓ Time synchronization configured${NC}"
+echo -e "${GREEN}✓ RTC-only time synchronization configured${NC}"
 
 echo -e "${GREEN}Step 8: Configuring systemd service...${NC}"
 
@@ -303,6 +317,18 @@ if [ ! -f "video-looper.service" ]; then
     echo -e "${RED}Error: video-looper.service file not found in current directory!${NC}"
     echo -e "${RED}Please run install.sh from the directory containing video-looper.service${NC}"
     exit 1
+fi
+
+# Install RTC time restore service (runs early at boot)
+if [ -f "rtc-time-restore.service" ]; then
+    echo -e "${GREEN}Installing RTC time restore service...${NC}"
+    RTC_SERVICE_FILE="/etc/systemd/system/rtc-time-restore.service"
+    sudo cp -f rtc-time-restore.service "$RTC_SERVICE_FILE"
+    sudo systemctl daemon-reload
+    sudo systemctl enable rtc-time-restore.service
+    echo -e "${GREEN}✓ RTC time restore service installed and enabled${NC}"
+else
+    echo -e "${YELLOW}Warning: rtc-time-restore.service not found, skipping...${NC}"
 fi
 
 # Always reinstall the service file from the installation folder

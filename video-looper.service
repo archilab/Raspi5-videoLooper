@@ -1,7 +1,7 @@
 [Unit]
 Description=Raspberry Pi Video Looper
-After=network-online.target systemd-timesyncd.service time-sync.target local-fs.target
-Wants=network-online.target systemd-timesyncd.service
+After=local-fs.target rtc-time-restore.service
+Wants=rtc-time-restore.service
 
 [Service]
 Type=simple

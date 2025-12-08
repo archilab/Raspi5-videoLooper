@@ -1,0 +1,23 @@
+[Unit]
+Description=Restore System Time from RTC
+After=local-fs.target
+Before=video-looper.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /home/looper/video_looper/time_sync.py --sync
+User=looper
+Group=looper
+CapabilityBoundingSet=CAP_SYS_TIME CAP_WAKE_ALARM
+AmbientCapabilities=CAP_SYS_TIME CAP_WAKE_ALARM
+NoNewPrivileges=no
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=30
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
+

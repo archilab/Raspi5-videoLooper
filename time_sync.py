@@ -154,20 +154,19 @@ class TimeSyncManager:
         
         last_error = None
         for attempt in range(1, retries + 1):
-        for cmd in commands_to_try:
-            try:
-                cmd_str = " ".join(cmd)
-                result = subprocess.run(
-                    self._sudo_cmd(cmd),
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    self.last_sync = "rtc_read"
-                    return True
-            except Exception:
-                continue
+            for cmd in commands_to_try:
+                try:
+                    result = subprocess.run(
+                        self._sudo_cmd(cmd),
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0:
+                        self.last_sync = "rtc_read"
+                        return True
+                except Exception:
+                    continue
             
             # If we get here, all commands failed for this attempt
             if attempt < retries:

@@ -41,9 +41,9 @@ class HDMIController:
             return False
         
         try:
-            cmd = ['sh', '-c', f'echo "{command}" | {self.cec_client_path} -s -d 1']
             result = subprocess.run(
-                cmd,
+                [self.cec_client_path, '-s', '-d', '1'],
+                input=f"{command}\n",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=5,
@@ -51,7 +51,7 @@ class HDMIController:
             )
             return result.returncode == 0
                 
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return False
     
     def set_hdmi_power(self, state):
@@ -81,9 +81,9 @@ class HDMIController:
             return None
         
         try:
-            cmd = ['sh', '-c', f'echo "tx 10:8F" | {self.cec_client_path} -s -d 1']
             result = subprocess.run(
-                cmd,
+                [self.cec_client_path, '-s', '-d', '1'],
+                input="tx 10:8F\n",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=3,
@@ -93,7 +93,7 @@ class HDMIController:
                 output = result.stdout.strip().lower()
                 return 1 if "ack" in output or "feature abort" not in output else 0
             return None
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return None
     
     def wake_hdmi(self):

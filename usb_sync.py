@@ -117,10 +117,10 @@ class USBSync:
                                     
                                     if not is_usbmount:
                                         usb_mounts.append(mount_path)
-            except Exception:
-                pass
+            except OSError as e:
+                self.logger.warning(f"Could not read /proc/mounts: {e}")
             
-        except Exception as e:
+        except OSError as e:
             self.logger.error(f"Error finding USB drives: {e}")
         
         # Sort to ensure usbmount paths come first
@@ -296,10 +296,27 @@ class USBSync:
         
         return (None, None)
     
+    def _copy_file_safely(self, source, destination):
+        """
+        Copy a file so that destination is only ever the old file or the complete new one.
+        An interruption leaves just a hidden temp file, which the next sync removes.
+        """
+        temp_file = destination.with_name(f".{destination.name}.tmp")
+        try:
+            shutil.copy2(source, temp_file)
+            with open(temp_file, 'rb') as f:
+                os.fsync(f.fileno())  # On disk before the rename, in case power is lost
+            self._set_looper_owner(temp_file)
+            os.replace(temp_file, destination)
+        except OSError:
+            temp_file.unlink(missing_ok=True)
+            raise
+
     def sync_folder(self, usb_folder_path, local_folder_path):
         """
         Sync a folder from USB to local directory
-        Copies missing files and updates existing ones
+        Copies missing files, updates changed ones, and removes videos and
+        projector configs that are no longer on the USB drive
         Args:
             usb_folder_path: Source folder on USB
             local_folder_path: Destination folder (local)
@@ -309,79 +326,80 @@ class USBSync:
         copied_count = 0
         updated_count = 0
         errors = []
-        
-        # Ensure local folder exists
+
         try:
             local_folder_path.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            errors.append(f"Failed to create local folder: {e}")
+            # Left by a sync that was interrupted
+            for stale_file in local_folder_path.glob('.*.tmp'):
+                stale_file.unlink()
+        except OSError as e:
+            errors.append(f"Failed to prepare local folder {local_folder_path.name}: {e}")
             return (copied_count, updated_count, errors)
-        
-        # Get files from both folders
+
         usb_files = self.get_folder_files_dict(usb_folder_path)
         local_files = self.get_folder_files_dict(local_folder_path)
-        
-        # Copy/update files from USB to local
+
         for filename, usb_file in usb_files.items():
             local_file = local_folder_path / filename
-            
             try:
-                # Check if file needs to be copied/updated
-                should_copy = False
-                if not local_file.exists():
-                    should_copy = True
-                else:
+                if filename in local_files:
                     usb_stat = usb_file.stat()
                     local_stat = local_file.stat()
-                    if (usb_stat.st_mtime > local_stat.st_mtime or 
-                        usb_stat.st_size != local_stat.st_size):
-                        should_copy = True
-                
-                if should_copy:
-                    shutil.copy2(usb_file, local_file)
-                    self._set_looper_owner(local_file)
-                    
-                    if filename in local_files:
-                        updated_count += 1
-                    else:
-                        copied_count += 1
-            except Exception as e:
-                error_msg = f"Failed to copy {filename}: {e}"
-                errors.append(error_msg)
-                self.logger.error(error_msg)
-        
-        # Copy projector config files if they exist
-        for config_file in PROJECTOR_CONFIG_FILES:
-            usb_config = usb_folder_path / config_file
-            local_config = local_folder_path / config_file
-            
-            if usb_config.exists():
-                try:
-                    shutil.copy2(usb_config, local_config)
-                    self._set_looper_owner(local_config)
-                except Exception:
-                    pass
-            elif local_config.exists():
-                try:
-                    local_config.unlink()
-                except Exception:
-                    pass
-        
-        # Delete local files that are not on USB
-        for filename, local_file in local_files.items():
-            if filename not in usb_files:
-                try:
-                    # Only delete video files and config files, not other files
-                    if (local_file.suffix.lower() in VIDEO_EXTENSIONS or
-                        local_file.name in PROJECTOR_CONFIG_FILES):
+                    if (usb_stat.st_mtime <= local_stat.st_mtime and
+                            usb_stat.st_size == local_stat.st_size):
+                        continue
+
+                self._copy_file_safely(usb_file, local_file)
+                if filename in local_files:
+                    updated_count += 1
+                else:
+                    copied_count += 1
+            except OSError as e:
+                errors.append(f"Failed to copy {filename}: {e}")
+
+        # Only remove old files once the new ones are safely in place
+        if not errors:
+            for filename, local_file in local_files.items():
+                if filename not in usb_files and (local_file.suffix.lower() in VIDEO_EXTENSIONS or
+                                                  filename in PROJECTOR_CONFIG_FILES):
+                    try:
                         local_file.unlink()
-                except Exception as e:
-                    error_msg = f"Failed to delete file {filename}: {e}"
-                    errors.append(error_msg)
-                    self.logger.warning(error_msg)
-        
+                    except OSError as e:
+                        errors.append(f"Failed to delete file {filename}: {e}")
+
         return (copied_count, updated_count, errors)
     
+    def plan_sync(self, usb_root_path):
+        """
+        Work out what syncing from a USB drive would do, without changing anything.
+        Both the real sync and its preview use this, so they can't disagree.
+        Returns:
+            dict: 'update' and 'copy' lists of folder names, 'rename' list of
+            (old name, new name), and 'delete' list of local folder names
+        """
+        usb_folders = self.get_valid_folders(usb_root_path)
+        local_folders = self.get_valid_folders(self.local_videos_path)
+
+        # Local folders that are going away. Only these may be renamed, since a folder
+        # that's still on the drive must stay, even if another one has the same videos.
+        leaving = {name: path for name, path in sorted(local_folders.items())
+                   if name not in usb_folders}
+        plan = {'update': [], 'copy': [], 'rename': [], 'delete': []}
+
+        for name, usb_folder in sorted(usb_folders.items()):
+            if name in local_folders:
+                plan['update'].append(name)
+                continue
+            old_name, _ = self.find_folder_with_same_videos(usb_folder, leaving)
+            if old_name:
+                del leaving[old_name]
+                plan['rename'].append((old_name, name))
+            else:
+                plan['copy'].append(name)
+
+        plan['delete'] = sorted(leaving)
+        return plan
+
     def sync_usb_to_local(self, usb_root_path):
         """
         Sync all valid video folders from USB drive to local directory
@@ -390,129 +408,75 @@ class USBSync:
         Returns:
             bool: True if sync was successful, False otherwise
         """
-        usb_folders = self.get_valid_folders(usb_root_path)
-        if not usb_folders:
+        usb_root_path = Path(usb_root_path)
+        plan = self.plan_sync(usb_root_path)
+        folder_count = len(plan['update']) + len(plan['copy']) + len(plan['rename'])
+        if not folder_count:
             return False
-        
-        local_folders = self.get_valid_folders(self.local_videos_path)
-        
-        # Ensure local videos directory exists
+
         try:
             self.local_videos_path.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
+        except OSError as e:
             self.logger.error(f"Failed to create local videos directory: {e}")
             return False
-        
-        # Display start message on screen
-        folder_count = len(usb_folders)
-        start_message = f"USB Sync Started\nCopying {folder_count} folder(s) from USB drive..."
-        self.display_message_on_screen(start_message)
-        
-        # Sync folders: copy/update from USB or rename existing folders
+
+        self.display_message_on_screen(
+            f"USB Sync Started\nCopying {folder_count} folder(s) from USB drive..."
+        )
+
         total_copied = 0
         total_updated = 0
         total_renamed = 0
         total_errors = []
-        renamed_folders = set()  # Track folders that were renamed
-        
-        for folder_name, usb_folder in usb_folders.items():
-            local_folder = self.local_videos_path / folder_name
-            
-            if folder_name in local_folders:
-                copied, updated, errors = self.sync_folder(usb_folder, local_folder)
-                total_copied += copied
-                total_updated += updated
-                total_errors.extend(errors)
-            else:
-                # Folder doesn't exist - check if there's a folder with same video files
-                # Exclude folders that were already renamed in this sync operation
-                folders_to_check = {
-                    name: path for name, path in local_folders.items() 
-                    if name not in renamed_folders
-                }
-                existing_folder_name, existing_folder_path = self.find_folder_with_same_videos(
-                    usb_folder, folders_to_check
-                )
-                
-                if existing_folder_name and existing_folder_path:
-                    try:
-                        new_folder_path = self.local_videos_path / folder_name
-                        existing_folder_path.rename(new_folder_path)
-                        
-                        # Update local_folders dict to reflect the rename
-                        del local_folders[existing_folder_name]
-                        local_folders[folder_name] = new_folder_path
-                        renamed_folders.add(existing_folder_name)
-                        renamed_folders.add(folder_name)
-                        
-                        # Now sync files (in case there are differences or new files)
-                        copied, updated, errors = self.sync_folder(usb_folder, new_folder_path)
-                        total_copied += copied
-                        total_updated += updated
-                        total_errors.extend(errors)
-                        
-                        total_renamed += 1
-                    except Exception as e:
-                        error_msg = f"Failed to rename folder: {e}"
-                        total_errors.append(error_msg)
-                        self.logger.error(error_msg)
-                        copied, updated, errors = self.sync_folder(usb_folder, local_folder)
-                        total_copied += copied
-                        total_updated += updated
-                        total_errors.extend(errors)
-                else:
-                    copied, updated, errors = self.sync_folder(usb_folder, local_folder)
-                    total_copied += copied
-                    total_updated += updated
-                    total_errors.extend(errors)
-        
-        # Delete local folders that are not on USB (excluding renamed folders)
-        folders_to_delete = []
-        for folder_name, local_folder in local_folders.items():
-            if folder_name not in usb_folders and folder_name not in renamed_folders:
-                folders_to_delete.append((folder_name, local_folder))
-        
-        if folders_to_delete:
-            for folder_name, local_folder in folders_to_delete:
-                try:
-                    shutil.rmtree(local_folder)
-                except Exception as e:
-                    error_msg = f"Failed to delete folder {folder_name}: {e}"
-                    total_errors.append(error_msg)
-                    self.logger.error(error_msg)
-        
+
+        # Renames first, so their files don't get copied again
+        for old_name, new_name in plan['rename']:
+            try:
+                (self.local_videos_path / old_name).rename(self.local_videos_path / new_name)
+                total_renamed += 1
+            except OSError as e:
+                total_errors.append(f"Failed to rename folder {old_name}: {e}")
+
+        # Syncing also picks up any differences in renamed folders, and copies them if the rename failed
+        for name in plan['update'] + plan['copy'] + [new_name for _, new_name in plan['rename']]:
+            copied, updated, errors = self.sync_folder(usb_root_path / name, self.local_videos_path / name)
+            total_copied += copied
+            total_updated += updated
+            total_errors.extend(errors)
+
+        # Only delete old folders if the new ones arrived safely, so a full disk
+        # or a failing drive can't leave the player with nothing
         if total_errors:
-            self.logger.warning(f"  - Errors: {len(total_errors)}")
-            for error in total_errors:
-                self.logger.warning(f"    {error}")
-        
-        # Display completion message on screen
-        if total_copied > 0 or total_updated > 0 or total_renamed > 0:
-            if total_errors:
-                completion_message = (
-                    f"USB Sync Completed with Errors\n"
-                    f"Copied: {total_copied} file(s)\n"
-                    f"Updated: {total_updated} file(s)\n"
-                    f"Renamed: {total_renamed} folder(s)\n"
-                    f"Errors: {len(total_errors)}"
-                )
-            else:
-                completion_message = (
-                    f"USB Sync Completed Successfully\n"
-                    f"Copied: {total_copied} file(s)\n"
-                    f"Updated: {total_updated} file(s)\n"
-                    f"Renamed: {total_renamed} folder(s)"
-                )
-            self.display_message_on_screen(completion_message)
-            # Keep message visible for 5 seconds
+            if plan['delete']:
+                self.logger.warning(f"Keeping old folders because of sync errors: {plan['delete']}")
+        else:
+            for name in plan['delete']:
+                try:
+                    shutil.rmtree(self.local_videos_path / name)
+                except OSError as e:
+                    total_errors.append(f"Failed to delete folder {name}: {e}")
+
+        for error in total_errors:
+            self.logger.error(f"USB sync: {error}")
+
+        summary = (
+            f"Copied: {total_copied} file(s)\n"
+            f"Updated: {total_updated} file(s)\n"
+            f"Renamed: {total_renamed} folder(s)"
+        )
+        if total_errors:
+            self.display_message_on_screen(
+                f"USB Sync Completed with Errors\n{summary}\nErrors: {len(total_errors)}"
+            )
+            time.sleep(5)
+        elif total_copied or total_updated or total_renamed:
+            self.display_message_on_screen(f"USB Sync Completed Successfully\n{summary}")
             time.sleep(5)
         else:
-            # No files copied/updated, just show brief message
-            if not total_errors:
-                self.display_message_on_screen("USB Sync Completed\nNo changes needed")
-                time.sleep(3)
-        
-        return len(total_errors) == 0
+            self.display_message_on_screen("USB Sync Completed\nNo changes needed")
+            time.sleep(3)
+
+        return not total_errors
     
     def check_rtc_time_file(self, usb_mount):
         """
@@ -550,6 +514,13 @@ class USBSync:
             self.logger.error(f"Error checking RTC time file: {e}")
             return False
     
+    def find_sync_source(self, usb_mounts):
+        """Pick the USB drive to sync from: the first one with valid video folders"""
+        for usb_mount in usb_mounts:
+            if self.get_valid_folders(usb_mount):
+                return usb_mount
+        return None
+
     def sync_on_boot(self):
         """
         Check for USB drives on boot and sync if found
@@ -558,27 +529,17 @@ class USBSync:
             bool: True if USB was found and synced, False otherwise
         """
         time.sleep(2)
-        
+
         usb_mounts = self.find_usb_drives()
-        if not usb_mounts:
-            return False
-        
-        rtc_set = False
         for usb_mount in usb_mounts:
             if self.check_rtc_time_file(usb_mount):
-                rtc_set = True
                 break
-        
-        for usb_mount in usb_mounts:
-            valid_folders = self.get_valid_folders(usb_mount)
-            if valid_folders:
-                success = self.sync_usb_to_local(usb_mount)
-                if not success:
-                    self.logger.warning(f"USB sync completed with errors from {usb_mount}")
-                return True
-            elif not rtc_set:
-                self.check_rtc_time_file(usb_mount)
-        
-        return False
+
+        source = self.find_sync_source(usb_mounts)
+        if source is None:
+            return False
+        if not self.sync_usb_to_local(source):
+            self.logger.warning(f"USB sync completed with errors from {source}")
+        return True
 
 

@@ -63,7 +63,7 @@ class VideoLooper:
     def setup_logging(self):
         """Setup logging configuration - minimal logging to reduce SD card wear"""
         logging.basicConfig(
-            level=logging.ERROR,  # Only log errors
+            level=logging.WARNING,  # Warnings and errors only
             format='%(levelname)s - %(message)s',
             handlers=[
                 logging.StreamHandler(sys.stderr)  # No file writes to reduce SD card wear
@@ -267,7 +267,7 @@ class VideoLooper:
                             file_size = video_file.stat().st_size
                             size_mb = file_size / (1024 * 1024)
                             size_str = f"{size_mb:.1f} MB"
-                        except Exception:
+                        except OSError:
                             size_str = "unknown size"
                         lines.append(f"       - {video_file.name} ({size_str})")
                     
@@ -307,8 +307,8 @@ class VideoLooper:
                 attrs[1] |= termios.OPOST | termios.ONLCR
                 termios.tcsetattr(fd, termios.TCSANOW, attrs)
                 return True
-        except Exception:
-            pass
+        except (termios.error, OSError, ValueError) as e:
+            self.logger.warning(f"Could not set up terminal input: {e}")
         return False
     
     def _restore_terminal_input(self):
@@ -316,8 +316,8 @@ class VideoLooper:
         try:
             if hasattr(self, 'old_settings') and sys.stdin.isatty():
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-        except Exception:
-            pass
+        except (termios.error, OSError, ValueError) as e:
+            self.logger.warning(f"Could not restore terminal settings: {e}")
     
     def get_char_blocking(self, timeout=None):
         """Get a single character with optional timeout - blocking"""
@@ -327,7 +327,7 @@ class VideoLooper:
                 if not ready:
                     return None
             return sys.stdin.read(1)
-        except Exception:
+        except (OSError, ValueError):
             return None
     
     def display_boot_menu(self):
@@ -734,7 +734,7 @@ class VideoLooper:
             )
             self.current_folder = folder_path
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.logger.error(f"Failed to start VLC: {e}")
             return False
     
@@ -751,7 +751,7 @@ class VideoLooper:
             except subprocess.TimeoutExpired:
                 self.current_process.kill()
                 self.current_process.wait()
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 self.logger.error(f"Error stopping video: {e}")
             finally:
                 self.current_process = None
@@ -823,21 +823,21 @@ class VideoLooper:
                                     width = int(parts[1])
                                     height = int(parts[2])
                                 break
-                except Exception:
+                except (OSError, ValueError, subprocess.SubprocessError):
                     pass
                 
                 buffer_size = width * height * 4
                 with open('/dev/fb0', 'wb') as fb:
                     fb.write(b'\x00' * min(buffer_size, 1920 * 1080 * 4))
-            except Exception:
+            except OSError:
                 pass
     
     def run(self):
         """Main loop"""
         try:
             self.usb_sync.sync_on_boot()
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.error(f"USB sync failed: {e}")
         
         # Load the system time from the RTC
         self.time_sync.sync_time()
@@ -1011,34 +1011,34 @@ def main():
         print(f"\nScanning USB drives...")
         usb_mounts = looper.usb_sync.find_usb_drives()
         print(f"Found {len(usb_mounts)} potential USB drive(s):")
-        
-        usb_folders_all = {}
+
         for mount in usb_mounts:
             print(f"  - {mount}")
             valid_folders = looper.usb_sync.get_valid_folders(mount)
             print(f"    Valid video folders: {len(valid_folders)}")
             for folder_name in valid_folders.keys():
                 print(f"      - {folder_name}")
-                usb_folders_all[folder_name] = mount
-        
+
         print(f"\nLocal video folders in {looper.videos_path}:")
         local_folders = looper.usb_sync.get_valid_folders(looper.videos_path)
         print(f"  Found {len(local_folders)} valid folder(s):")
         for folder_name in local_folders.keys():
             print(f"    - {folder_name}")
-        
-        if usb_mounts and usb_folders_all:
-            print(f"\nIf synced, would:")
-            for folder_name in usb_folders_all.keys():
-                if folder_name not in local_folders:
-                    print(f"  - Copy folder: {folder_name}")
-                else:
-                    print(f"  - Update folder: {folder_name}")
-            for folder_name in local_folders.keys():
-                if folder_name not in usb_folders_all:
-                    print(f"  - Delete folder: {folder_name}")
+
+        source = looper.usb_sync.find_sync_source(usb_mounts)
+        if source:
+            plan = looper.usb_sync.plan_sync(source)
+            print(f"\nIf synced from {source}, would:")
+            for old_name, new_name in plan['rename']:
+                print(f"  - Rename folder: {old_name} -> {new_name}")
+            for folder_name in plan['copy']:
+                print(f"  - Copy folder: {folder_name}")
+            for folder_name in plan['update']:
+                print(f"  - Update folder: {folder_name}")
+            for folder_name in plan['delete']:
+                print(f"  - Delete folder: {folder_name}")
         return
-    
+
     elif args.usb_sync:
         # Manual USB sync
         print("Syncing from USB drive...")

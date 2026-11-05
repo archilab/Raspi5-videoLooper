@@ -61,7 +61,7 @@ class ProjectorController:
             
             return True
             
-        except Exception as e:
+        except (OSError, ValueError) as e:
             self.logger.error(f"Error loading config: {e}")
             return False
     
@@ -107,7 +107,7 @@ class ProjectorController:
             
             return result.returncode == 0
                 
-        except Exception:
+        except (OSError, ValueError, subprocess.SubprocessError):
             return False
     
     def connect(self):
@@ -137,7 +137,7 @@ class ProjectorController:
             self.is_connected = True
             return True
             
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             self.logger.error(f"Failed to connect: {e}")
             self.is_connected = False
             return False
@@ -148,7 +148,7 @@ class ProjectorController:
             try:
                 self.serial_connection.close()
                 self.is_connected = False
-            except Exception:
+            except OSError:
                 pass
     
     def send_command(self, command):
@@ -168,7 +168,7 @@ class ProjectorController:
             
             return True
             
-        except Exception as e:
+        except OSError as e:
             self.logger.error(f"Error sending command: {e}")
             return False
     

@@ -3,11 +3,15 @@
 Decides what should play, from folder names in the videos directory
 Format: YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 Example: 2024-01-01_to_2024-01-31_0900_to_1800
+
+If the end time is before the start time the window runs overnight. It starts on each
+date in the range, so the last night continues into the morning after the end date:
+2024-01-01_to_2024-01-03_2200_to_0600 plays from 22:00 on Jan 1 until 06:00 on Jan 4.
 """
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from constants import FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT, VIDEO_EXTENSIONS
 
 logger = logging.getLogger(__name__)
@@ -38,8 +42,19 @@ def is_folder_active(folder_name, now=None):
         return False
 
     now = now or datetime.now()
-    return (schedule['start_date'] <= now.date() <= schedule['end_date'] and
-            schedule['start_time'] <= now.time() <= schedule['end_time'])
+    today, current_time = now.date(), now.time()
+    start_date, end_date = schedule['start_date'], schedule['end_date']
+    start_time, end_time = schedule['start_time'], schedule['end_time']
+
+    if start_time <= end_time:
+        return start_date <= today <= end_date and start_time <= current_time <= end_time
+
+    # Overnight: before midnight it's tonight's window, after midnight it's last night's
+    if current_time >= start_time:
+        return start_date <= today <= end_date
+    if current_time <= end_time:
+        return start_date <= today - timedelta(days=1) <= end_date
+    return False
 
 
 def get_video_files(folder_path):

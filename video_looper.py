@@ -18,7 +18,7 @@ from player import Player
 from projector_controller import ProjectorController
 from time_sync import TimeSyncManager
 from usb_sync import USBSync
-from constants import DEFAULT_VIDEOS_PATH, CHECK_INTERVAL
+from constants import DEFAULT_VIDEOS_PATH, CHECK_INTERVAL, DEFAULT_SERIAL_PORT
 
 
 class VideoLooper:
@@ -69,8 +69,8 @@ class VideoLooper:
         time_entry_held = False
         while self.running:
             try:
-                # Boot menu is setting the time: keep the screen free and awake for it,
-                # then re-check the schedule against the new time as soon as it's done
+                # Boot menu needs the screen, to set the time or run the demo: keep it free
+                # and awake, then re-check the schedule as soon as the menu is done
                 if time_entry.is_active():
                     if not time_entry_held:
                         time_entry_held = True
@@ -107,7 +107,7 @@ class VideoLooper:
                         # was last told to be on, or the last attempt failed.
                         self.hdmi.standby_hdmi()
 
-                # Wait for the next check, but react to time entry within a second
+                # Wait for the next check, but react to the menu within a second
                 for _ in range(CHECK_INTERVAL):
                     if time_entry.is_active():
                         break
@@ -120,6 +120,25 @@ class VideoLooper:
                 time.sleep(60)
         
         self.player.stop_video(standby_hdmi=True)
+
+
+def load_projector_config(looper):
+    """
+    Load the projector settings for the command line: those of the folder playing now,
+    otherwise of the first folder that has any, otherwise the defaults.
+    Returns True if projector control is enabled in those settings.
+    """
+    active = scheduler.find_active_folder(looper.videos_path)
+    folders = ([active] if active else []) + scheduler.get_all_valid_folders(looper.videos_path)
+    for folder_path, _ in folders:
+        if looper.player.has_projector_config(folder_path):
+            looper.player.load_projector_config(folder_path)
+            print(f"Using projector settings from: {folder_path.name}")
+            break
+    else:
+        looper.projector.config = looper.projector.get_default_config()
+        print("No projector settings found in any video folder, using the defaults")
+    return looper.projector.config.get('enable_projector', False)
 
 
 def main():
@@ -136,11 +155,11 @@ def main():
     parser.add_argument('--sync-time', action='store_true',
                        help='Force time synchronization')
     parser.add_argument('--projector-test', action='store_true',
-                       help='Test projector connection')
+                       help='Check that the projector serial port opens (sends nothing)')
     parser.add_argument('--projector-start', action='store_true',
-                       help='Start projector')
+                       help='Send the power on command to the projector')
     parser.add_argument('--projector-stop', action='store_true',
-                       help='Stop projector')
+                       help='Send the power off command to the projector')
     parser.add_argument('--list-ports', action='store_true',
                        help='List available serial ports')
     parser.add_argument('--usb-sync', action='store_true',
@@ -150,7 +169,7 @@ def main():
     parser.add_argument('--usb-path', default=None,
                        help='Path to USB drive to sync from (optional, auto-detects if not specified)')
     parser.add_argument('--display-folder-info', action='store_true',
-                       help='Display folder information on screen for 20 seconds')
+                       help='Show the folder list and boot menu on the HDMI console')
     
     args = parser.parse_args()
     
@@ -186,39 +205,38 @@ def main():
     
     elif args.projector_test:
         # Test projector connection
-        print("Testing projector connection...")
+        load_projector_config(looper)
+        port = looper.projector.config.get('serial_port', DEFAULT_SERIAL_PORT)
+        print(f"Testing serial port {port}...")
         if looper.projector.test_connection():
-            print("✓ Projector connection test successful")
+            print(f"✓ Serial port {port} opened")
+            print("  This shows the adapter and settings work, not that a projector is listening.")
+            print("  --projector-start sends a real power on command.")
         else:
-            print("✗ Projector connection test failed")
+            print(f"✗ Could not open serial port {port}")
+            print("  Check the USB-to-serial adapter, and see --list-ports.")
+            sys.exit(1)
         return
-    
-    elif args.projector_start:
-        # Start projector
-        print("Starting projector...")
-        if looper.projector.connect():
-            if looper.projector.start_projector():
-                print("✓ Projector started successfully")
-            else:
-                print("✗ Failed to start projector")
-            looper.projector.disconnect()
-        else:
+
+    elif args.projector_start or args.projector_stop:
+        # Send a real power command
+        action = 'Starting' if args.projector_start else 'Stopping'
+        if not load_projector_config(looper):
+            print("✗ Projector control is off in these settings: set enable_projector=true")
+            sys.exit(1)
+        print(f"{action} projector...")
+        if not looper.projector.connect():
             print("✗ Failed to connect to projector")
+            sys.exit(1)
+        send = looper.projector.start_projector if args.projector_start else looper.projector.stop_projector
+        sent = send()
+        looper.projector.disconnect()
+        if not sent:
+            print("✗ Failed to send the command")
+            sys.exit(1)
+        print("✓ Command sent")
         return
-    
-    elif args.projector_stop:
-        # Stop projector
-        print("Stopping projector...")
-        if looper.projector.connect():
-            if looper.projector.stop_projector():
-                print("✓ Projector stopped successfully")
-            else:
-                print("✗ Failed to stop projector")
-            looper.projector.disconnect()
-        else:
-            print("✗ Failed to connect to projector")
-        return
-    
+
     elif args.list_ports:
         # List available serial ports
         print("Available serial ports:")

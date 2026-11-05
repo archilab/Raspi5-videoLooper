@@ -1,3 +1,5 @@
+import os
+import pty
 import subprocess
 import tempfile
 import unittest
@@ -91,6 +93,19 @@ class ProjectorErrors(unittest.TestCase):
         self.assertFalse(self.projector.connect())
         self.projector.config['baud_rate'] = 'fast'
         self.assertFalse(self.projector.connect())
+
+    def test_connection_test_opens_and_closes_the_port(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        self.projector.config = {'enable_projector': False, 'serial_port': os.ttyname(slave), 'configure_stty': False}
+        self.assertTrue(self.projector.test_connection())
+        self.assertFalse(self.projector.is_connected)
+        self.assertFalse(self.projector.serial_connection.is_open)
+
+    def test_connection_test_fails_for_a_missing_port(self):
+        self.projector.config = {'serial_port': str(self.tmp / 'nope'), 'configure_stty': False}
+        self.assertFalse(self.projector.test_connection())
 
     def test_disabled_projector_does_nothing(self):
         self.projector.config = {'enable_projector': False}

@@ -22,6 +22,19 @@ class Player:
         """Check whether VLC is running"""
         return self.current_process is not None and self.current_process.poll() is None
 
+    def wait_for_vlc_to_exit(self, timeout=15):
+        """Wait until no VLC is running on the system, including one the service started"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if subprocess.run(['pgrep', '-x', 'vlc'], stdout=subprocess.DEVNULL, timeout=5).returncode != 0:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                return False
+            time.sleep(0.5)
+        self.logger.warning("VLC is still running; the demo may not get the display")
+        return False
+
     def has_projector_config(self, folder_path):
         """Check if folder has projector configuration file"""
         for config_file in PROJECTOR_CONFIG_FILES:
@@ -61,13 +74,14 @@ class Player:
             if self.hdmi.wake_hdmi():
                 time.sleep(HDMI_WAKE_DELAY)
     
-    def start_video(self, video_files, folder_path, duration=None):
+    def start_video(self, video_files, folder_path, duration=None, ignore_hold=False):
         """
         Start VLC and the projector for a folder's videos
         Args:
             video_files: List of video file paths
             folder_path: Path to folder containing videos
             duration: Seconds to play for (demo mode), or None to loop until stopped
+            ignore_hold: Start even during a menu hold, for the demo that holds it
         Returns:
             bool: True if started successfully, False otherwise
         """
@@ -86,8 +100,8 @@ class Player:
                     self.logger.error("Failed to start projector")
             self.handle_video_start_delay(folder_path)
 
-        # Time entry may have started during the delays above
-        if time_entry.is_active():
+        # The menu may have taken the screen during the delays above
+        if not ignore_hold and time_entry.is_active():
             return False
 
         # Create VLC command using cvlc (command-line VLC)

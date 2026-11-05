@@ -43,33 +43,18 @@ wait_for_response=false
 }
 
 # ===========================================
-# Common Projector Commands by Brand
+# Projector Commands
 # ===========================================
 
-# Epson projectors
+# Commands differ by brand and model, so check your projector's manual.
+
+# Example, used by many projectors:
 # start_command=PWR ON
 # stop_command=PWR OFF
-# status_command=PWR?
 
-# Sony projectors
-# start_command=PWR ON
-# stop_command=PWR OFF
-# status_command=PWR?
-
-# Panasonic projectors
-# start_command=PWR ON
-# stop_command=PWR OFF
-# status_command=PWR?
-
-# BenQ projectors
-# start_command=PWR ON
-# stop_command=PWR OFF
-# status_command=PWR?
-
-# Optoma projectors (default configuration)
+# Optoma (the default if none are set):
 # start_command=~0000 1
 # stop_command=~0000 0
-# configure_stty=true  # Uses stty to configure serial port (recommended for Optoma)
 
 # ===========================================
 # Configuration Options Explained
@@ -87,7 +72,7 @@ wait_for_response=false
 #   - Check your projector manual for correct baud rate
 
 # timeout: seconds
-#   - How long to wait for projector response
+#   - Serial timeout
 
 # start_command: "PWR ON", "POWER ON", etc.
 #   - Command to turn projector on
@@ -110,8 +95,10 @@ wait_for_response=false
 #   - Allows projector to fully start before video begins
 
 # wait_for_response: true/false
-#   - Whether to wait for projector response
-#   - Some projectors send confirmation messages
+#   - Read the reply after sending a command, without checking it
+
+# configure_stty: true/false
+#   - Also set up the serial port with stty (default: true)
 
 # ===========================================
 # Troubleshooting Tips
@@ -120,10 +107,10 @@ wait_for_response=false
 # 1. Check serial port:
 #    python3 video_looper.py --list-ports
 
-# 2. Test projector connection:
+# 2. Check that the serial port opens (sends nothing to the projector):
 #    python3 video_looper.py --projector-test
 
-# 3. Test projector commands:
+# 3. Send the real commands (needs enable_projector=true):
 #    python3 video_looper.py --projector-start
 #    python3 video_looper.py --projector-stop
 

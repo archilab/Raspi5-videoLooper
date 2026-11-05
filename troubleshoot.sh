@@ -65,10 +65,10 @@ check_dependencies() {
     fi
     
     if systemctl is-active --quiet systemd-timesyncd; then
-        echo -e "${GREEN}✓ systemd-timesyncd is running${NC}"
+        echo -e "${YELLOW}⚠ systemd-timesyncd is running, but this system should use only the RTC${NC}"
+        echo "Disable with: sudo systemctl disable --now systemd-timesyncd"
     else
-        echo -e "${YELLOW}⚠ systemd-timesyncd is not running${NC}"
-        echo "Start with: sudo systemctl start systemd-timesyncd"
+        echo -e "${GREEN}✓ NTP is off, the system runs on the RTC${NC}"
     fi
 }
 
@@ -142,11 +142,11 @@ check_time_sync() {
     timedatectl status | grep -E "(NTP|RTC|Time zone)"
     
     echo ""
-    echo "Testing time sync:"
-    if python3 "$VIDEO_LOOPER_DIR/time_sync.py" --status; then
-        echo -e "${GREEN}✓ Time sync status retrieved${NC}"
+    if [ -e /sys/class/rtc/rtc0/since_epoch ]; then
+        rtc_seconds=$(cat /sys/class/rtc/rtc0/since_epoch)
+        echo "RTC is $(( rtc_seconds - $(date +%s) )) second(s) ahead of the system clock"
     else
-        echo -e "${RED}✗ Time sync status check failed${NC}"
+        echo -e "${RED}✗ No RTC found${NC}"
     fi
 }
 
@@ -185,16 +185,15 @@ check_projector() {
 check_display() {
     echo -e "${YELLOW}Checking display settings...${NC}"
     
-    if [ -n "$DISPLAY" ]; then
-        echo -e "${GREEN}✓ DISPLAY variable is set: $DISPLAY${NC}"
+    for status_file in /sys/class/drm/card*-HDMI-*/status; do
+        echo "$(basename "$(dirname "$status_file")"): $(cat "$status_file")"
+    done
+
+    if command_exists cec-client; then
+        echo "Devices answering CEC (only the Pi itself means the display isn't answering):"
+        echo scan | cec-client -s -d 1 | grep -E "^device|^osd string"
     else
-        echo -e "${RED}✗ DISPLAY variable is not set${NC}"
-        echo "This may cause VLC to fail"
-    fi
-    
-    if command_exists xrandr; then
-        echo "Available displays:"
-        xrandr --query | grep " connected"
+        echo -e "${YELLOW}⚠ cec-client is not installed${NC}"
     fi
 }
 
@@ -248,6 +247,6 @@ echo "1. If service won't start: sudo systemctl restart video-looper"
 echo "2. If VLC fails: sudo apt install --reinstall vlc"
 echo "3. If permissions wrong: sudo chown -R looper:looper $VIDEOS_DIR"
 echo "4. If no videos found: Check folder naming convention"
-echo "5. If display issues: export DISPLAY=:0"
+echo "5. If the time is wrong after power loss: check the RTC battery, and set the time from the boot menu"
 echo ""
 echo "For more help, check the README.md file"

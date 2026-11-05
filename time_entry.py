@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Coordinates the boot menu and the looper service while the time is being set.
+Coordinates the boot menu and the looper service when the menu needs the screen,
+for setting the time or running the demo.
 
 They run as separate processes. The menu takes a file lock to hold the video, which
 the kernel releases even if the menu crashes. The menu has no permission to change
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def acquire_hold():
     """
-    Menu side: tell the service to hold the video while the time is being entered.
+    Menu side: tell the service to stop its video and leave the display alone.
     Returns the open lock file (close it to release), or None if it can't be taken.
     """
     try:
@@ -28,12 +29,12 @@ def acquire_hold():
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         return lock_file
     except OSError as e:
-        logger.error(f"Could not hold video during time entry: {e}")
+        logger.error(f"Could not hold the video for the menu: {e}")
         return None
 
 
 def is_active():
-    """Check whether the boot menu currently holds the time entry lock"""
+    """Check whether the boot menu currently holds the lock"""
     try:
         with open(TIME_ENTRY_LOCK_FILE, 'a') as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_SH | fcntl.LOCK_NB)

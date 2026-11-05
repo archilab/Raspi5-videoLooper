@@ -123,35 +123,14 @@ echo "Examples:"
 echo "• 2024-01-01_to_2024-01-31_0900_to_1800  (January, 9AM-6PM)"
 echo "• 2024-12-01_to_2024-12-31_1000_to_2200  (December, 10AM-10PM)"
 echo "• 2024-06-15_to_2024-06-30_0800_to_2000  (June 15-30, 8AM-8PM)"
+echo "• 2024-12-01_to_2024-12-03_2200_to_0600  (Overnight: Dec 1 10PM until Dec 4 6AM)"
 echo ""
 echo "=== Current Date/Time Check ==="
 echo "Current date: $(date '+%Y-%m-%d')"
 echo "Current time: $(date '+%H:%M')"
 echo ""
-echo "Based on current date/time, the following folders would be active:"
-
-# Check which folders would be active now
-CURRENT_DATE=$(date '+%Y-%m-%d')
-CURRENT_TIME=$(date '+%H%M')
-
-for folder in "$VIDEOS_DIR"/*; do
-    if [ -d "$folder" ]; then
-        folder_name=$(basename "$folder")
-        # Extract dates and times from folder name
-        if [[ $folder_name =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})_to_([0-9]{4}-[0-9]{2}-[0-9]{2})_([0-9]{4})_to_([0-9]{4})$ ]]; then
-            start_date="${BASH_REMATCH[1]}"
-            end_date="${BASH_REMATCH[2]}"
-            start_time="${BASH_REMATCH[3]}"
-            end_time="${BASH_REMATCH[4]}"
-            
-            if [[ "$CURRENT_DATE" >= "$start_date" && "$CURRENT_DATE" <= "$end_date" && "$CURRENT_TIME" >= "$start_time" && "$CURRENT_TIME" <= "$end_time" ]]; then
-                echo "✓ $folder_name (ACTIVE NOW)"
-            else
-                echo "○ $folder_name (inactive)"
-            fi
-        fi
-    fi
-done
+echo "Based on current date/time:"
+python3 /home/looper/video_looper/video_looper.py --test --videos-path "$VIDEOS_DIR"
 
 echo ""
 echo "=== Quick Commands ==="

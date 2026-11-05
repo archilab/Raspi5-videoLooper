@@ -1,561 +1,125 @@
-# Raspberry Pi 5 Video Looper Documentation
+# Raspberry Pi 5 Video Looper
 
-## Overview
+Unattended video playback for a Raspberry Pi 5 driving a screen or projector, for signage or installations. It works offline: you put videos in folders, and **each folder's name sets when it plays**.
 
-This project creates an automated video looper system for Raspberry Pi 5 that uses VLC media player without GUI. The system supports intelligent scheduling through folder naming conventions, allowing you to control when specific video sets are played based on date and time.
+- Loops videos silently and fullscreen with VLC, starting on boot
+- Schedules by date and daily hours, including overnight
+- Updates content from a USB drive when the service starts
+- Keeps time with the Pi's battery-backed real-time clock (RTC), with no network needed
+- Switches a projector on and off over USB serial, with settings per folder
+- Puts an HDMI display in standby outside scheduled hours, if the display supports CEC
 
-## Features
+## Scheduling
 
-- **Headless VLC Operation**: Runs cvlc (command-line VLC) as unprivileged user without GUI for optimal performance
-- **Date/Time Scheduling**: Control video playback through folder naming
-- **Automatic Time Synchronization**: Uses NTP when internet is available, falls back to RTC
-- **Projector Control**: USB-to-serial communication with projectors/beamers
-- **HDMI Display Control**: Automatic HDMI standby/wake using CEC (Consumer Electronics Control)
-- **Display Clearing**: Automatically clears display when video stops
-- **USB Drive Sync**: Automatic synchronization of video folders from USB drives on boot
-- **Smart Folder Renaming**: Automatically renames existing folders when USB folder has same video files
-- **Configurable Delays**: Video start delays and projector timing control
-- **Automatic Startup**: Runs as a systemd service, starting automatically on boot
-- **Multiple Video Support**: Loops through all videos in active folders
-- **Graceful Switching**: Automatically switches between different video sets based on schedule
-- **Comprehensive Logging**: Detailed logs for monitoring and debugging
-- **Easy Management**: Simple service commands for start/stop/restart
-
-## Folder Naming Convention
-
-The system uses a specific folder naming convention to control when videos are played:
+Name a folder like this:
 
 ```
 YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 ```
 
-### Examples:
-- `2024-01-01_to_2024-01-31_0900_to_1800` - Play videos from January 1-31, 2024, between 9:00 AM and 6:00 PM
-- `2024-12-01_to_2024-12-31_1000_to_2200` - Play videos from December 1-31, 2024, between 10:00 AM and 10:00 PM
-- `2024-06-15_to_2024-06-30_0800_to_2000` - Play videos from June 15-30, 2024, between 8:00 AM and 8:00 PM
+| Folder name | Plays |
+|---|---|
+| `2026-12-01_to_2026-12-31_1000_to_2200` | Every day in December, 10:00 to 22:00 |
+| `2026-06-15_to_2026-06-30_0800_to_2000` | June 15–30, 08:00 to 20:00 |
+| `2026-12-01_to_2026-12-03_2200_to_0600` | Overnight: 22:00 on Dec 1 until 06:00 on Dec 4 |
 
-### Format Details:
-- **Start Date**: `YYYY-MM-DD` format (e.g., `2024-01-01`)
-- **End Date**: `YYYY-MM-DD` format (e.g., `2024-01-31`)
-- **Start Time**: `HHMM` format in 24-hour time (e.g., `0900` for 9:00 AM)
-- **End Time**: `HHMM` format in 24-hour time (e.g., `1800` for 6:00 PM)
-
-## Installation
-
-### Prerequisites
-- Raspberry Pi 5 with Raspberry Pi OS (lite)
-- Internet connection for package installation and NTP synchronization
-- The installation script will automatically create the "looper" user if it doesn't exist
-- Video files in supported formats (MP4, AVI, MOV, MKV, WMV, FLV, WebM, M4V)
-- USB-to-serial adapter for projector control (optional)
-- HDMI display with CEC support (optional, for automatic display control)
-- USB drive with valid video folders (optional, for automatic sync)
-
-### Quick Installation
-
-1. **Download the project files** to your Raspberry Pi
-2. **Make the installation script executable**:
-   ```bash
-   chmod +x install.sh
-   ```
-3. **Run the installation script**:
-   ```bash
-   ./install.sh
-   ```
-
-The installation script will:
-- Create the "looper" user (if it doesn't exist)
-- Update system packages
-- Install VLC, Python dependencies, time synchronization tools, and CEC utilities
-- Configure NTP synchronization with multiple servers
-- Create necessary directories (`/home/looper/video_looper` and `/home/looper/videos`)
-- Copy files to appropriate locations (including HDMI controller and USB sync modules)
-- Set up the systemd service
-- Configure permissions
-- Test the installation
-- Create example folder structure
-
-### Manual Installation
-
-If you prefer manual installation:
-
-1. **Install dependencies**:
-   ```bash
-   sudo apt update
-   sudo apt install -y vlc python3 python3-pip git ffmpeg python3-requests python3-serial cec-utils
-   ```
-
-2. **Create looper user** (if it doesn't exist):
-   ```bash
-   sudo useradd -m -s /bin/bash looper
-   ```
-
-3. **Create directories**:
-   ```bash
-   sudo mkdir -p /home/looper/video_looper
-   sudo mkdir -p /home/looper/videos
-   ```
-
-4. **Copy files**:
-   ```bash
-   sudo cp video_looper.py /home/looper/video_looper/
-   sudo cp time_sync.py /home/looper/video_looper/
-   sudo cp projector_controller.py /home/looper/video_looper/
-   sudo cp hdmi_controller.py /home/looper/video_looper/
-   sudo cp console.py constants.py boot_menu.py player.py scheduler.py time_entry.py /home/looper/video_looper/
-   sudo cp usb_sync.py /home/looper/video_looper/
-   sudo cp video-looper.service /etc/systemd/system/
-   ```
-
-5. **Set permissions**:
-   ```bash
-   sudo chmod +x /home/looper/video_looper/video_looper.py
-   sudo chmod +x /home/looper/video_looper/time_sync.py
-   sudo chmod +x /home/looper/video_looper/projector_controller.py
-   sudo chmod +x /home/looper/video_looper/hdmi_controller.py
-   sudo chmod +x /home/looper/video_looper/usb_sync.py
-   sudo chown -R looper:looper /home/looper/video_looper
-   sudo chown -R looper:looper /home/looper/videos
-   ```
-
-6. **Configure time synchronization**:
-   ```bash
-   sudo systemctl enable systemd-timesyncd
-   sudo systemctl start systemd-timesyncd
-   ```
-
-7. **Enable and start service**:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable video-looper
-   sudo systemctl start video-looper
-   ```
-
-## Usage
-
-### Adding Videos
-
-1. **Create folders** with the naming convention in `/home/looper/videos/`
-2. **Add video files** to the appropriate folders
-3. **The system will automatically detect and play videos** based on the current date and time
-
-### Example Folder Structure
+- **Overnight windows:** if the end time is before the start time, the window starts on each date in the range and ends the next morning. The last night therefore runs into the morning after the end date.
+- **Overlaps:** if several folders are active, the one with the latest start date plays. Give overlapping folders different start dates, since the winner is otherwise arbitrary.
+- **Videos:** every video in the folder loops in filename order. Supported: `.mp4 .avi .mov .mkv .wmv .flv .webm .m4v`.
+- **Ignored:** folders with no videos or a name that doesn't match, and files starting with `.`.
+- **Timing:** the schedule is checked every 30 seconds, so changes take up to 30 seconds to apply. You can add folders without restarting.
 
 ```
 /home/looper/videos/
-├── 2024-01-01_to_2024-01-31_0900_to_1800/
-│   ├── morning_ad.mp4
-│   ├── product_demo.mp4
-│   └── company_intro.mp4
-├── 2024-02-01_to_2024-02-29_0800_to_2000/
-│   ├── valentine_promo.mp4
-│   └── february_sale.mp4
-└── 2024-12-01_to_2024-12-31_1000_to_2200/
-    ├── christmas_ad.mp4
-    ├── holiday_sale.mp4
-    └── new_year_promo.mp4
+├── 2026-12-01_to_2026-12-31_1000_to_2200/
+│   ├── christmas.mp4
+│   ├── sale.mp4
+│   └── projector.txt          (optional, see Projector control)
+└── 2026-06-15_to_2026-06-30_0800_to_2000/
+    └── summer.mp4
 ```
 
-### Service Management
+## Installation
 
-**Start the service**:
-```bash
-sudo systemctl start video-looper
-```
-
-**Stop the service**:
-```bash
-sudo systemctl stop video-looper
-```
-
-**Restart the service**:
-```bash
-sudo systemctl restart video-looper
-```
-
-**Check service status**:
-```bash
-sudo systemctl status video-looper
-```
-
-**View logs**:
-```bash
-sudo journalctl -u video-looper -f
-```
-
-**Disable autostart**:
-```bash
-sudo systemctl disable video-looper
-```
-
-### Testing
-
-**Test mode** (shows what would be played without starting VLC):
-```bash
-cd /home/looper/video_looper
-python3 video_looper.py --test
-```
-
-**Test with custom videos path**:
-```bash
-python3 video_looper.py --videos-path /path/to/videos --test
-```
-
-**Check time synchronization status**:
-```bash
-python3 video_looper.py --time-status
-```
-
-**Force time synchronization**:
-```bash
-python3 video_looper.py --sync-time
-```
-
-**Test USB sync** (dry-run, shows what would be synced):
-```bash
-python3 video_looper.py --usb-sync-test
-```
-
-**Manual USB sync**:
-```bash
-python3 video_looper.py --usb-sync
-```
-
-**USB sync from specific path**:
-```bash
-python3 video_looper.py --usb-sync --usb-path /media/looper/USBDRIVE
-```
-
-## USB Drive Synchronization
-
-The system automatically synchronizes video folders from USB drives on boot. This allows you to update video content by simply inserting a USB drive.
-
-### How It Works
-
-1. **On Boot**: The system checks for mounted USB drives
-2. **Valid Folders**: Only folders matching the naming convention with at least one video file are synced
-3. **Smart Renaming**: If a USB folder has the same video files as an existing local folder (but different name), the local folder is renamed instead of copying files again
-4. **File Sync**: Missing files are copied, existing files are updated if newer or different size
-5. **Cleanup**: Local folders not found on USB (with valid folders) are deleted
-
-### USB Sync Process
-
-When a USB drive is detected on boot:
-
-1. **Scan USB Drive**: System searches common mount points (`/media/looper`, `/mnt`, `/run/media/looper`)
-2. **Find Valid Folders**: Identifies folders matching the naming pattern with video files
-3. **Compare with Local**: Compares USB folders with `/home/looper/videos/`
-4. **Rename or Copy**:
-   - If local folder with same name exists → sync files
-   - If local folder with same video files exists → rename local folder to match USB name
-   - If no match → copy new folder from USB
-5. **Delete Obsolete**: Remove local folders not on USB (if USB has valid folders)
-6. **File Management**: Copy/update individual files within folders
-
-### Example Scenarios
-
-**Scenario 1: New Folder on USB**
-- USB has: `2024-01-01_to_2024-01-31_0900_to_1800/` with `video.mp4`
-- Local has: No matching folder
-- Result: Folder is copied to local
-
-**Scenario 2: Folder Rename (Same Video Files)**
-- USB has: `2024-01-01_to_2024-01-31_0900_to_1800/` with `video.mp4`
-- Local has: `2023-12-01_to_2023-12-31_0900_to_1800/` with `video.mp4`
-- Result: Local folder is renamed to `2024-01-01_to_2024-01-31_0900_to_1800/` (no file copy needed)
-
-**Scenario 3: Updated Files**
-- USB has: `2024-01-01_to_2024-01-31_0900_to_1800/` with updated `video.mp4`
-- Local has: `2024-01-01_to_2024-01-31_0900_to_1800/` with older `video.mp4`
-- Result: File is updated if USB file is newer or different size
-
-**Scenario 4: Folder Removed from USB**
-- USB has: No valid folders
-- Local has: `2024-01-01_to_2024-01-31_0900_to_1800/`
-- Result: Nothing changes (no deletion if USB has no valid folders)
-
-### Manual USB Sync
-
-You can manually trigger USB sync at any time:
+You need a Raspberry Pi 5 running Raspberry Pi OS Lite, an internet connection during installation, and a user with `sudo`. Don't run the script as root.
 
 ```bash
-# Test mode (shows what would be synced without copying)
-python3 video_looper.py --usb-sync-test
-
-# Sync from auto-detected USB drives
-python3 video_looper.py --usb-sync
-
-# Sync from specific USB path
-python3 video_looper.py --usb-sync --usb-path /media/looper/USBDRIVE
+chmod +x install.sh
+./install.sh
 ```
 
-### RTC Time Setting from USB Drive
+The script changes the whole system, so read it first on a Pi that has other uses. It:
 
-The system can set the RTC (Real Time Clock) time from a file on the USB drive. This is useful when there's no internet connection and you need to set the system time.
+- Upgrades all packages, and installs VLC, `cec-utils`, `python3-serial` and others
+- Creates the `looper` user, which runs everything, and sets it to log in automatically on the HDMI console
+- If `looper` already exists and `admin` doesn't, creates `admin` with **passwordless sudo**
+- **Disables NTP**, because the system runs on the RTC alone
+- Sets up USB automounting at `/media/usb1` to `/media/usb4`
+- Installs and starts the `video-looper` and `rtc-time-restore` services
+- Creates example folders dated 2024, containing empty placeholder videos, which you can delete
 
-**How it works:**
-1. On boot, the system checks USB drives for RTC time files
-2. If found, the time from the file is used to set the RTC
-3. This happens before video folder sync
+`setup_examples.sh` creates more example folders, and `troubleshoot.sh` runs a read-only system check.
 
-**RTC Time File:**
-- **File names** (checked in order):
-  - `rtc_time.txt` (primary)
-  - `time.txt`
-  - `set_time.txt`
-  - `rtc_time`
-- **Supported formats:**
-  - ISO format: `2024-01-15T14:30:00`
-  - Date + Time: `2024-01-15 14:30:00`
-  - Date + Time (no seconds): `2024-01-15 14:30`
-  - Unix timestamp: `1705324200`
+## Updating videos from a USB drive
 
-**Example time files:**
+Put your schedule folders in the top level of the drive, plug it in, and restart the service or reboot. The sync only runs when the service starts.
 
-**ISO format** (`rtc_time.txt`):
-```
-2024-01-15T14:30:00
-```
+**The USB drive is the source of truth.** Local folders that aren't on the drive are removed, so the drive must hold everything you want to keep playing. A drive with no valid folders changes nothing.
 
-**Date + Time format** (`rtc_time.txt`):
-```
-2024-01-15 14:30:00
-```
-
-**Unix timestamp** (`rtc_time.txt`):
-```
-1705324200
-```
-
-**Notes:**
-- RTC time setting requires `sudo` permissions (handled by the system)
-- The time file is read from the root of the USB drive
-- Only one RTC time file is processed (first found)
-- Time setting happens before video folder sync
-- If time setting fails, the system continues with video sync
-
-### USB Drive Requirements
-
-- **Automatic Mounting**: USB drives are automatically mounted when inserted:
-  - Mount points: `/media/usb0`, `/media/usb1`, `/media/usb2`, `/media/usb3`
-  - USB drives are automatically mounted when inserted (using usbmount if available, otherwise udev-based mounting)
-  - Mount points are owned by the `looper` user for easy access
-- **Supported File Systems**: 
-  - vfat (FAT32)
-  - ntfs
-  - ext4
-  - exfat
-- **Valid Folders**: Must match naming convention: `YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM`
-- **Video Files**: Must contain at least one video file in supported formats
-- **RTC Time File**: Optional file to set system time (see above)
-
-### Notes
-
-- **Manual USB Mounting Required**: USB drives must be manually mounted before syncing. The system will check common mount points for mounted USB drives.
-- USB sync runs automatically on boot (waits 2 seconds for USB detection)
-- RTC time file is checked first, before video folder sync
-- Only valid video folders are considered for sync
-- Folder renaming preserves existing video files when folder names change
-- Projector config files are also synced if present
-- Logs show detailed sync operations and any errors
-
-## RTC Time Setting
-
-The system can set the RTC (Real Time Clock) time from a file on USB drives. This is particularly useful when there's no internet connection and NTP synchronization is unavailable.
-
-### Features
-
-- **USB Drive Time File**: Automatically detects and reads time from USB drive
-- **Multiple Formats**: Supports ISO format, date+time, and Unix timestamps
-- **Automatic Setting**: Sets RTC time during USB sync on boot
-- **Fallback Support**: Works when NTP is unavailable
-
-### Time File Format
-
-Create a file named `rtc_time.txt` (or `time.txt`, `set_time.txt`, `rtc_time`) on your USB drive root with one of these formats:
-
-**ISO Format** (recommended):
-```
-2024-01-15T14:30:00
-```
-
-**Date + Time Format**:
-```
-2024-01-15 14:30:00
-```
-
-**Date + Time (no seconds)**:
-```
-2024-01-15 14:30
-```
-
-**Unix Timestamp**:
-```
-1705324200
-```
-
-### How It Works
-
-1. **On Boot**: System checks USB drives for RTC time files
-2. **File Detection**: Looks for `rtc_time.txt`, `time.txt`, `set_time.txt`, or `rtc_time` in USB root
-3. **Time Parsing**: Parses time from file using supported formats
-4. **RTC Setting**: Sets system time and syncs to RTC hardware clock
-5. **Before Sync**: RTC time is set before video folder sync begins
-
-### Manual RTC Time Setting
-
-You can also set RTC time manually using the time sync module:
+To see what a sync would do, without changing anything:
 
 ```bash
-# Set RTC from a time file
-python3 time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
-
-# Check current RTC status
-python3 time_sync.py --status
+sudo -u looper python3 /home/looper/video_looper/video_looper.py --usb-sync-test
 ```
 
-### Example Usage
+- **Same name:** new and changed files are copied, and videos and projector settings no longer on the drive are removed from that folder. Other files are left alone.
+- **New name, same video filenames:** if a local folder that's leaving has the same video filenames, it's renamed instead of copied, so changing a schedule is quick.
+- **Several drives:** the first one with valid folders is used.
+- **Interruptions:** each file is copied to a hidden temporary name and then renamed, so an interrupted copy can't damage an existing video.
+- **Errors:** if a copy fails, for example on a full disk, nothing old is deleted. The screen shows a summary and the details go to the log.
 
-1. **Create time file on USB drive**:
-   ```bash
-   echo "2024-01-15T14:30:00" > /media/usb/rtc_time.txt
-   ```
+## Boot menu
 
-2. **Insert USB drive and boot Raspberry Pi**:
-   - System will automatically detect and set RTC time
-   - Check logs: `sudo journalctl -u video-looper | grep -i rtc`
+After each boot, the HDMI console shows the folder list for 10 seconds, then this menu for 20 seconds. Connect a USB keyboard to use it.
 
-3. **Verify time was set**:
-   ```bash
-   python3 time_sync.py --status
-   ```
+| Key | Action |
+|---|---|
+| `1` | Demo mode: plays each folder for one minute with 30 seconds between, ignoring schedules |
+| `2` | Set the date and time |
+| `Enter` | Continue, which also happens when the countdown ends |
 
-### Notes
+The service's video can start while the menu is on screen and cover it. Pressing `1` or `2` still works: the video stops within a couple of seconds, and returns by itself when you're done.
 
-- RTC time setting requires `sudo` permissions (handled automatically)
-- Only the first RTC time file found is used
-- If parsing fails, the system logs an error and continues
-- Time setting happens before video folder sync
-- Useful for offline installations or when NTP is unavailable
+## Time
 
-## HDMI Display Control
+The system uses only the RTC, with NTP disabled. The time is loaded from the RTC at startup, so **schedules are only as accurate as the RTC**.
 
-The system automatically manages HDMI display power using CEC (Consumer Electronics Control), allowing seamless control of connected displays.
+**To set the time**, press `2` at the boot menu and enter the year, month, day, hour and minute. A value with fewer digits than the prompt's maximum, like `5` for May, needs `Enter`. Seconds are set to `00`. The video waits until you finish or cancel, and the service then rechecks the schedule. Each step cancels itself after 60 seconds.
 
-### Features
+**RTC battery:** without a working battery, the RTC stops while the Pi has no power and comes back wrong. If you use the official rechargeable Raspberry Pi RTC battery, enable charging in `/boot/firmware/config.txt` and reboot:
 
-- **Automatic Wake**: Display wakes up when video playback starts
-- **Automatic Standby**: Display goes to standby when video stops
-- **Display Clearing**: Screen is cleared to black when video stops
-- **CEC Compatibility**: Works with any CEC-compatible HDMI display
+```
+dtparam=rtc_bbat_vchg=3000000
+```
 
-### How It Works
+Never enable this with a non-rechargeable cell such as a CR2032.
 
-1. **On Video Start**: HDMI display is woken via CEC before VLC starts
-2. **During Playback**: Display remains active
-3. **On Video Stop**: Display screen is cleared, then put in standby mode
-4. **Folder Switches**: Display stays on during folder transitions (no standby)
+## Display control
 
-### Requirements
+The service wakes the display before playing and puts it in standby when nothing is scheduled, using HDMI-CEC. A command is only sent when the desired state changes, so turning the display on or off by hand isn't undone until the next change.
 
-- **CEC Support**: HDMI display must support CEC (Consumer Electronics Control)
-- **CEC Utils**: Package `cec-utils` is automatically installed during setup
-- **HDMI Connection**: Display must be connected via HDMI
-
-### Manual Control
-
-You can manually control the HDMI display:
+**Not every display responds to CEC**, and many monitors and projectors ignore it. Those displays stay on outside scheduled hours, showing the console or a blank screen. On a TV, CEC may be a setting under a brand name such as Anynet+ or Bravia Sync. To see what the Pi can detect:
 
 ```bash
-# Wake display
-python3 hdmi_controller.py --on
-
-# Put display in standby
-python3 hdmi_controller.py --off
-
-# Check display status
-python3 hdmi_controller.py --status
+echo scan | cec-client -s -d 1
 ```
 
-### Display Clearing
+If the scan only lists the Pi itself, the display isn't answering CEC. The display may still obey commands without answering, so check whether it actually goes to standby.
 
-When video playback stops, the system automatically clears the display using multiple methods:
-1. `fbset -blank` (primary method)
-2. `setterm` console blanking
-3. Direct framebuffer clearing (if accessible)
-4. Terminal clear command (fallback)
+## Projector control
 
-This ensures no leftover video frames remain visible when playback stops.
+Control a projector through a USB-to-serial adapter by putting a settings file in a video folder. The file can be named `projector.txt`, `projector.conf` or `config.txt`, as `key=value` lines or JSON. See `projector_config_examples.txt` for full examples.
 
-## Configuration
-
-### Time Synchronization
-
-The system automatically handles time synchronization using a multi-tier approach:
-
-1. **NTP (Network Time Protocol)**: Primary time source when internet is available
-   - Uses multiple NTP servers: `pool.ntp.org`, `time.google.com`, `time.cloudflare.com`
-   - Falls back to `time.nist.gov` if primary servers fail
-   - Synchronizes every hour automatically
-
-2. **RTC (Real Time Clock)**: Fallback when internet is unavailable
-   - Uses the Raspberry Pi's hardware clock
-   - Maintains time accuracy during offline periods
-   - Can be set from USB drive time file (see RTC Time Setting section)
-
-3. **USB Drive Time File**: Sets RTC time from file on USB drive
-   - Automatically detected during USB sync on boot
-   - Useful when NTP is unavailable
-   - Supports multiple time formats (ISO, date+time, Unix timestamp)
-
-4. **Manual Sync**: Force synchronization when needed
-   ```bash
-   python3 video_looper.py --sync-time
-   ```
-
-5. **Manual RTC Setting**: Set RTC from time file
-   ```bash
-   python3 time_sync.py --set-rtc-from-file /path/to/rtc_time.txt
-   ```
-
-## Projector Control
-
-The system supports automatic projector control through USB-to-serial communication. Each video folder can have its own projector configuration.
-
-### Configuration Files
-
-Place a configuration file in your video folder with one of these names:
-- `projector.txt` (simple format)
-- `projector.conf` (JSON format)
-- `config.txt` (alternative name)
-
-### Configuration Options
-
-```bash
-# Enable/disable projector control
-enable_projector=true
-
-# Serial communication settings
-serial_port=/dev/ttyUSB0
-baud_rate=9600
-timeout=5
-
-# Projector commands (adjust for your projector model)
-start_command=PWR ON
-stop_command=PWR OFF
-
-# Timing settings (in seconds)
-start_delay=2          # Delay before sending start command
-stop_delay=1           # Delay before sending stop command
-video_start_delay=5    # Delay before starting video playback
-
-# Optional settings
-wait_for_response=false
-```
-
-### Example Configuration
-
-**Simple format (`projector.txt`)**:
 ```
 enable_projector=true
 serial_port=/dev/ttyUSB0
@@ -563,251 +127,120 @@ baud_rate=9600
 start_command=PWR ON
 stop_command=PWR OFF
 start_delay=2
+stop_delay=1
 video_start_delay=5
 ```
 
-**JSON format (`projector.conf`)**:
-```json
-{
-    "enable_projector": true,
-    "serial_port": "/dev/ttyUSB0",
-    "baud_rate": 9600,
-    "start_command": "PWR ON",
-    "stop_command": "PWR OFF",
-    "start_delay": 2,
-    "video_start_delay": 5
-}
-```
+| Setting | Meaning | Default |
+|---|---|---|
+| `enable_projector` | Control the projector for this folder | `false` |
+| `serial_port` | Adapter port; find it with `--list-ports` | `/dev/ttyUSB0` |
+| `baud_rate` | Serial speed from the projector's manual | `9600` |
+| `timeout` | Serial timeout in seconds | `5` |
+| `start_command`, `stop_command` | Power commands; a carriage return is added | `~0000 1`, `~0000 0` (Optoma) |
+| `start_delay`, `stop_delay` | Seconds to wait before sending each command | `0` |
+| `video_start_delay` | Seconds between the start command and the video | `0` |
+| `wait_for_response` | Read the reply after sending, without checking it | `false` |
+| `configure_stty` | Also set up the port with `stty` | `true` |
 
-### Projector Commands by Brand
+**Commands differ by model, so check your projector's manual.** The system only sends commands. It doesn't check that the projector responded, and a failure doesn't stop the video.
 
-| Brand | Start Command | Stop Command | Notes |
-|-------|---------------|--------------|-------|
-| Epson | `PWR ON` | `PWR OFF` | Most common |
-| Sony | `PWR ON` | `PWR OFF` | Standard RS-232 |
-| Panasonic | `PWR ON` | `PWR OFF` | Standard RS-232 |
-| BenQ | `PWR ON` | `PWR OFF` | Standard RS-232 |
-| Optoma | `PWR ON` | `PWR OFF` | Standard RS-232 |
-
-### Projector Management Commands
-
-**List available serial ports**:
-```bash
-python3 video_looper.py --list-ports
-```
-
-**Test projector connection**:
-```bash
-python3 video_looper.py --projector-test
-```
-
-**Start projector manually**:
-```bash
-python3 video_looper.py --projector-start
-```
-
-**Stop projector manually**:
-```bash
-python3 video_looper.py --projector-stop
-```
-
-### Customizing Paths
-
-You can customize the videos directory and log file location:
+To test, using the settings of the folder playing now, or otherwise the first folder with settings:
 
 ```bash
-python3 video_looper.py --videos-path /custom/videos/path
+sudo -u looper python3 /home/looper/video_looper/video_looper.py --projector-test
 ```
 
-### Service Configuration
+`--projector-test` only opens the serial port and sends nothing. That shows the adapter and settings work, but not that a projector is listening. `--projector-start` and `--projector-stop` send the real commands, and need `enable_projector=true`.
 
-The systemd service file (`/etc/systemd/system/video-looper.service`) runs as the `looper` user. The service file can be modified to:
-- Modify environment variables
-- Adjust restart behavior
-- Change security settings
+## Commands
 
-**Note**: The service is configured to run as the `looper` user. If you need to change this, you must also update the service file and ensure the user exists.
+Run these as `looper`, for example `sudo -u looper python3 /home/looper/video_looper/video_looper.py --test`.
 
-## Troubleshooting
+| Option | Action |
+|---|---|
+| `--test` | Show what should be playing now |
+| `--videos-path PATH` | Use another videos folder, combined with another option |
+| `--time-status` | Show the time sync mode |
+| `--sync-time` | Load the system time from the RTC |
+| `--list-ports` | List serial ports |
+| `--projector-test` | Check that the projector's serial port opens |
+| `--projector-start` | Send the power on command |
+| `--projector-stop` | Send the power off command |
+| `--usb-sync-test` | Preview a USB sync |
+| `--usb-sync` | Sync now, and `--usb-path PATH` picks the drive. Stop the service first, since the sync can replace or remove what's playing |
+| `--display-folder-info` | Show the folder list and boot menu |
 
-### Common Issues
+Managing the service:
 
-1. **Service won't start**:
-   - Check if VLC is installed: `vlc --version`
-   - Verify Python script permissions: `ls -la /home/looper/video_looper/video_looper.py`
-   - Check service logs: `sudo journalctl -u video-looper -n 50`
-   - Verify looper user exists: `id looper`
-
-2. **No videos playing**:
-   - Verify folder naming convention
-   - Check if current date/time matches folder schedule
-   - Ensure video files are in supported formats
-   - Test with `--test` flag
-
-3. **VLC errors**:
-   - Check if display is available: `echo $DISPLAY`
-   - Verify video file formats are supported
-   - Check VLC installation: `sudo apt install --reinstall vlc`
-   - Test cvlc directly: `cvlc --intf dummy --help`
-   - Verify service is running as looper user: `ps aux | grep python3 | grep looper`
-
-4. **Time synchronization issues**:
-   - Check NTP status: `timedatectl status`
-   - Test time sync: `python3 time_sync.py --test`
-   - Check internet connectivity: `ping -c 3 8.8.8.8`
-   - Restart timesyncd: `sudo systemctl restart systemd-timesyncd`
-
-5. **Permission issues**:
-   - Ensure looper user owns directories: `sudo chown -R looper:looper /home/looper/videos`
-   - Verify looper user exists: `id looper`
-
-6. **Projector control issues**:
-   - Check serial port: `python3 video_looper.py --list-ports`
-   - Test projector: `python3 video_looper.py --projector-test`
-   - Verify USB-to-serial adapter: `lsusb`
-   - Check projector commands in manual
-   - Verify baud rate settings
-   - Test with manual commands: `python3 video_looper.py --projector-start`
-
-7. **HDMI display control issues**:
-   - Verify CEC utilities installed: `which cec-client`
-   - Check CEC support: `cec-client -l`
-   - Test HDMI control: `python3 hdmi_controller.py --on`
-   - Verify HDMI connection is active
-   - Check if display supports CEC (enabled in display settings)
-
-8. **USB sync issues**:
-   - Verify USB drive is mounted: `mount | grep -i usb`
-   - Check mount points: `ls -la /media/usb0 /media/usb1 /media/usb2 /media/usb3`
-   - Check if usbmount is installed: `dpkg -l | grep usbmount` (optional, uses udev if not available)
-   - Verify udev rules: `cat /etc/udev/rules.d/99-usb-automount.rules`
-   - Check USB mount script: `ls -la /usr/local/bin/usb-mount.sh`
-   - Check USB drive auto-mounting: Insert USB drive and check `/media/usb0`
-   - Test USB sync: `python3 video_looper.py --usb-sync-test`
-   - Verify folder naming convention matches requirements
-   - Ensure folders contain at least one video file
-   - Check USB drive permissions: `ls -la /media/usb0`
-   - Review sync logs: `sudo journalctl -u video-looper | grep -i usb`
-   - If USB drive doesn't auto-mount:
-     - Check udev rules are loaded: `sudo udevadm control --reload-rules && sudo udevadm trigger`
-     - Check system logs for USB events: `sudo journalctl -u systemd-udevd | grep -i usb`
-     - Check dmesg for USB errors: `dmesg | grep -i usb`
-     - Verify filesystem is supported (vfat, ntfs, ext4, exfat)
-     - Manually test mount: `sudo mount /dev/sda1 /media/usb0`
-     - Check mount script manually: `sudo /usr/local/bin/usb-mount.sh sda1`
-
-9. **RTC time setting issues**:
-   - Verify RTC time file exists on USB: `ls /media/looper/rtc_time.txt`
-   - Check time file format: `cat /media/looper/rtc_time.txt`
-   - Test RTC time setting: `python3 time_sync.py --set-rtc-from-file /media/looper/rtc_time.txt`
-   - Verify RTC is available: `sudo hwclock --show`
-   - Check for parsing errors in logs: `sudo journalctl -u video-looper | grep -i rtc`
-   - Ensure time file is in root of USB drive (not in subdirectory)
-   - Verify time format is supported (ISO, date+time, or Unix timestamp)
-   - Check permissions: `sudo chmod 644 /media/looper/rtc_time.txt`
-
-### Log Analysis
-
-**View recent logs**:
 ```bash
-sudo journalctl -u video-looper --since "1 hour ago"
-```
-
-**View all logs**:
-```bash
-sudo journalctl -u video-looper
-```
-
-**Follow logs in real-time**:
-```bash
+sudo systemctl status video-looper
+sudo systemctl restart video-looper
 sudo journalctl -u video-looper -f
 ```
 
-### Debug Mode
+## Troubleshooting
 
-Run the script manually for debugging:
+`troubleshoot.sh` checks most of this automatically.
+
+| Problem | What to check |
+|---|---|
+| Nothing plays | Run `--test`. Check the folder name, that it contains a video, and that the Pi's `date` is correct |
+| Wrong time after power loss | The RTC battery, under Time above |
+| New folders didn't arrive | The sync only runs at service start. Check with `--usb-sync-test` and `mount \| grep media` |
+| Local folder disappeared | It wasn't on the USB drive when the service started |
+| Display stays on after hours | The display may not respond to CEC, under Display control above |
+| Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual |
+| Service won't start | `sudo journalctl -u video-looper -n 50` |
+
+Only warnings and errors are logged, to the system journal and not to a file, to reduce SD card wear. Errors from the boot menu aren't logged, because the login script discards them. The journal may not survive a reboot, depending on the system's configuration.
+
+## How it works
+
+Two systemd services run as `looper`, with permission to set the clock but without root. `rtc-time-restore` sets the clock early in boot, then `video-looper` syncs from USB and runs the main loop.
+
+The boot menu is a separate process started by the console login. When it needs the screen, it takes a file lock. The service then stops its video until the lock is released, which the kernel does even if the menu crashes. The menu has no permission to set the clock, so it passes the entered time to the service.
+
+| File | Responsibility |
+|---|---|
+| `video_looper.py` | Main loop and command line |
+| `scheduler.py` | Parses folder names and decides what should play |
+| `player.py` | VLC, and the display and projector around playback |
+| `boot_menu.py` | Menu screens, key input, time prompts, demo mode |
+| `time_entry.py` | The hold and time handoff between menu and service |
+| `time_sync.py` | Reads and writes the RTC and system clock |
+| `usb_sync.py` | USB detection, sync planning and safe copying |
+| `hdmi_controller.py` | CEC display commands |
+| `projector_controller.py` | Serial projector commands |
+| `console.py` | Writes to the HDMI console |
+| `constants.py` | Shared settings, like paths and the 30-second check interval |
+| `99-looper-rtc.rules` | Gives `looper` access to the RTC device |
+| `install.sh`, `deploy.sh` | Set up a Pi, and update its code |
+
+## Development
+
+Tests use only Python's standard library plus `pyserial`, and run on any Mac or Linux machine. They never touch the real clock, display, projector or VLC.
+
 ```bash
-cd /home/looper/video_looper
-sudo -u looper python3 video_looper.py --videos-path /home/looper/videos
+python3 -m unittest
 ```
 
-## Advanced Usage
+`deploy.sh` updates the code on a Pi that `install.sh` has already set up, using SSH key login and passwordless `sudo`. It only restarts the service if something changed, and refuses to restart if the USB sync would delete local folders. It doesn't change the videos folder itself, and new modules need adding to the file lists in both `deploy.sh` and `install.sh`, which the tests check.
 
-### Multiple Active Folders
-
-If multiple folders are active at the same time, the system will:
-1. Sort folders by start date (most recent first)
-2. Play videos from the folder with the most recent start date
-
-### Video Format Support
-
-Supported video formats:
-- MP4 (`.mp4`)
-- AVI (`.avi`)
-- MOV (`.mov`)
-- MKV (`.mkv`)
-- WMV (`.wmv`)
-- FLV (`.flv`)
-- WebM (`.webm`)
-- M4V (`.m4v`)
-
-### Performance Optimization
-
-For optimal performance:
-- Use MP4 format when possible (best hardware acceleration support)
-- Ensure videos are properly encoded for your display resolution
-- Consider using SSD storage for better performance
-- Monitor CPU usage: `htop`
-
-## File Structure
-
-```
-Raspi5-videoLooper/
-├── video_looper.py          # Main Python script
-├── time_sync.py             # Time synchronization module
-├── projector_controller.py  # Projector control module
-├── hdmi_controller.py       # HDMI display control module (CEC)
-├── console.py               # Shows text on the HDMI console
-├── scheduler.py             # Decides what should play from folder names
-├── player.py                # VLC, display and projector around playback
-├── boot_menu.py             # Boot menu, demo mode and time entry
-├── time_entry.py            # Coordinates the menu and service while setting the time
-├── tests/                   # Run with: python3 -m unittest
-├── usb_sync.py              # USB drive synchronization module
-├── video-looper.service     # Systemd service file
-├── install.sh              # Installation script
-├── setup_examples.sh        # Example folder structure setup
-├── troubleshoot.sh          # Troubleshooting and diagnostics
-├── projector_config_examples.txt # Projector configuration examples
-├── README.md               # This documentation
-└── .gitattributes          # Git configuration
+```bash
+LOOPER_HOST=admin@192.168.1.140 ./deploy.sh --check
+LOOPER_HOST=admin@192.168.1.140 ./deploy.sh
 ```
 
-## System Requirements
+Other options are `--restart` to force a restart, and `--allow-usb-delete` to override the USB check.
 
-- **Hardware**: Raspberry Pi 5 (recommended) or Pi 4
-- **OS**: Raspberry Pi OS (latest version)
-- **Storage**: Minimum 8GB SD card (32GB+ recommended for videos)
-- **Memory**: 4GB+ RAM recommended
-- **Display**: HDMI display or monitor
-- **Network**: Internet connection for installation
+## Security notes
 
-## Security Considerations
-
-- The service runs as the `looper` user (not root)
-- Limited file system access through systemd security settings
-- Log files are accessible only to the looper user
-- No network services exposed
-- The looper user is automatically created during installation if it doesn't exist
-
-## Support
-
-For issues and questions:
-1. Check the troubleshooting section above
-2. Review service logs: `sudo journalctl -u video-looper -f`
-3. Test with `--test` flag to verify configuration
-4. Ensure all prerequisites are met
+- The services run as `looper`, not root, and need no network. They hold the capability to set the clock.
+- `install.sh` gives `hwclock` that capability too, and the RTC rule gives `looper` the device, so the `looper` user can change the clock outside the services.
+- The HDMI console logs in as `looper` automatically, so anyone with a keyboard on the Pi gets that user's shell.
+- `admin`, when `install.sh` creates it, has passwordless `sudo`, so protect its SSH access.
 
 ## License
 
-This project is provided as-is for educational and personal use.
+Provided as-is for educational and personal use.

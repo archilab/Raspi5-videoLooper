@@ -46,6 +46,26 @@ class Packaging(unittest.TestCase):
         self.assertTrue((ROOT / '99-looper-rtc.rules').exists())
 
 
+class Documentation(unittest.TestCase):
+    def test_readme_only_lists_real_options(self):
+        readme = (ROOT / 'README.md').read_text()
+        known = ' '.join((ROOT / name).read_text() for name in ('video_looper.py', 'deploy.sh'))
+        for option in set(re.findall(r'(?<![\w-])--[a-z][a-z-]+', readme)):
+            self.assertIn(option, known, f'README mentions {option}')
+
+    def test_readme_lists_every_option(self):
+        readme = (ROOT / 'README.md').read_text()
+        options = re.findall(r"add_argument\('(--[a-z-]+)'", (ROOT / 'video_looper.py').read_text())
+        self.assertGreater(len(options), 5)
+        for option in options:
+            self.assertIn(option, readme)
+
+    def test_readme_lists_every_module(self):
+        readme = (ROOT / 'README.md').read_text()
+        for module in MODULES:
+            self.assertIn(f'`{module}`', readme)
+
+
 class CommandLine(unittest.TestCase):
     def run_cli(self, script, *args):
         return subprocess.run([sys.executable, str(ROOT / script), *args], cwd=ROOT,
@@ -69,6 +89,24 @@ class CommandLine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = self.run_cli('video_looper.py', '--test', '--videos-path', tmp)
         self.assertIn('No active folders found', result.stdout)
+
+    def test_projector_test_reports_a_missing_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            videos = Path(tmp) / 'videos'
+            make_tree(videos, {'2026-01-01_to_2026-01-02_0900_to_1800': {
+                'a.mp4': '', 'projector.txt': f'serial_port={tmp}/nope\nconfigure_stty=false\n'}})
+            result = self.run_cli('video_looper.py', '--projector-test', '--videos-path', str(videos))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Using projector settings from: 2026-01-01', result.stdout)
+        self.assertIn('Could not open serial port', result.stdout)
+
+    def test_projector_start_refuses_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            videos = Path(tmp) / 'videos'
+            make_tree(videos, {'2026-01-01_to_2026-01-02_0900_to_1800': {'a.mp4': '', 'projector.txt': 'enable_projector=false\n'}})
+            result = self.run_cli('video_looper.py', '--projector-start', '--videos-path', str(videos))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Projector control is off', result.stdout)
 
     def test_usb_preview_runs_without_changing_anything(self):
         with tempfile.TemporaryDirectory() as tmp:

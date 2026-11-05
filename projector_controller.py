@@ -111,18 +111,21 @@ class ProjectorController:
             return False
     
     def connect(self):
-        """Connect to projector via serial"""
+        """Connect to projector via serial, if projector control is enabled"""
         if not self.config.get('enable_projector', False):
             return True
-        
+        return self._open_port()
+
+    def _open_port(self):
+        """Open the configured serial port"""
         try:
             port = self.config.get('serial_port', DEFAULT_SERIAL_PORT)
             baud_rate = int(self.config.get('baud_rate', DEFAULT_BAUD_RATE))
             timeout = int(self.config.get('timeout', DEFAULT_SERIAL_TIMEOUT))
-            
+
             # Configure serial port with stty if enabled
             self.configure_serial_port(port)
-            
+
             self.serial_connection = serial.Serial(
                 port=port,
                 baudrate=baud_rate,
@@ -133,15 +136,26 @@ class ProjectorController:
                 xonxoff=False,  # -ixon -ixoff
                 rtscts=False    # -crtscts
             )
-            
+
             self.is_connected = True
             return True
-            
+
         except (OSError, ValueError, TypeError) as e:
             self.logger.error(f"Failed to connect: {e}")
             self.is_connected = False
             return False
-    
+
+    def test_connection(self):
+        """
+        Check that the serial port opens, even if projector control is disabled.
+        Sends nothing, so the projector isn't affected. This shows the adapter and
+        settings work, but not that a projector is listening.
+        """
+        if not self._open_port():
+            return False
+        self.disconnect()
+        return True
+
     def disconnect(self):
         """Disconnect from projector"""
         if self.serial_connection and self.is_connected:

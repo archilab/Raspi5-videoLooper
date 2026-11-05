@@ -117,6 +117,27 @@ class Syncing(UsbSyncTestCase):
         self.assertIn('Keeping old folders', output)
 
 
+class OnBoot(UsbSyncTestCase):
+    def test_syncs_from_the_first_drive_with_folders(self):
+        sync = self.setup_drives({FA: VIDEO}, {})
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertTrue(sync.sync_on_boot())
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_nothing_to_do_without_a_drive(self):
+        sync = self.setup_drives({}, {FA: VIDEO})
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[]):
+            self.assertFalse(sync.sync_on_boot())
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_time_file_on_the_drive_is_just_ignored(self):
+        sync = self.setup_drives({FA: VIDEO}, {})
+        (self.usb / 'rtc_time.txt').write_text('2020-01-01 00:00:00')
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertTrue(sync.sync_on_boot())
+        self.assertFalse(hasattr(sync, 'check_rtc_time_file'))
+
+
 class SyncFolder(UsbSyncTestCase):
     def test_leftover_temp_file_is_ignored_then_removed(self):
         sync = self.setup_drives({FA: {'a.mp4': 'new'}}, {FA: {'a.mp4': 'old', '.a.mp4.tmp': 'partial'}})

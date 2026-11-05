@@ -478,42 +478,6 @@ class USBSync:
 
         return not total_errors
     
-    def check_rtc_time_file(self, usb_mount):
-        """
-        Check for RTC time file on USB drive and set RTC if found
-        Args:
-            usb_mount: Path to USB mount point
-        Returns:
-            bool: True if RTC time file was found and set, False otherwise
-        """
-        try:
-            # Import here to avoid circular imports
-            try:
-                from time_sync import TimeSyncManager
-            except ImportError as e:
-                self.logger.error(f"Could not import TimeSyncManager: {e}")
-                return False
-            
-            # Common RTC time file names
-            rtc_file_names = ['rtc_time.txt', 'time.txt', 'set_time.txt', 'rtc_time', 'rtc_time.txt']
-            
-            for rtc_file_name in rtc_file_names:
-                rtc_file_path = Path(usb_mount) / rtc_file_name
-                
-                if rtc_file_path.exists() and rtc_file_path.is_file():
-                    time_sync = TimeSyncManager()
-                    if time_sync.set_rtc_from_file(str(rtc_file_path)):
-                        return True
-                    else:
-                        self.logger.warning(f"Failed to set RTC time from file: {rtc_file_path}")
-                        return False
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Error checking RTC time file: {e}")
-            return False
-    
     def find_sync_source(self, usb_mounts):
         """Pick the USB drive to sync from: the first one with valid video folders"""
         for usb_mount in usb_mounts:
@@ -524,18 +488,12 @@ class USBSync:
     def sync_on_boot(self):
         """
         Check for USB drives on boot and sync if found
-        Also checks for RTC time file on USB drive
         Returns:
             bool: True if USB was found and synced, False otherwise
         """
         time.sleep(2)
 
-        usb_mounts = self.find_usb_drives()
-        for usb_mount in usb_mounts:
-            if self.check_rtc_time_file(usb_mount):
-                break
-
-        source = self.find_sync_source(usb_mounts)
+        source = self.find_sync_source(self.find_usb_drives())
         if source is None:
             return False
         if not self.sync_usb_to_local(source):

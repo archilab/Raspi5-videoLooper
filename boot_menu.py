@@ -355,24 +355,36 @@ class BootMenu:
         time.sleep(duration)
     
     def run_demo_mode(self):
-        """Run demo mode - play all folders for 1 minute each with 30 sec pause"""
+        """Play all folders for 1 minute each with a 30 second pause, while the service waits"""
+        hold = time_entry.acquire_hold()
+        try:
+            self._play_demo()
+        finally:
+            # The service takes the display back when the hold ends
+            self.player.stop_video(standby_hdmi=False)
+            if hold:
+                hold.close()
+
+    def _play_demo(self):
         try:
             all_folders = scheduler.get_all_valid_folders(self.videos_path)
-            
+
             if not all_folders:
                 self.show_message("No valid video folders found for demo mode.", 5)
                 return
-            
+
             self.show_message(f"Starting demo mode with {len(all_folders)} folder(s)...", 3)
-            
+
+            # Only one VLC can use the display, so the service's has to go first
+            self.player.wait_for_vlc_to_exit()
             self.player.wake_display()
-            
+
             for folder_path, video_files in all_folders:
                 folder_name = folder_path.name
                 self.show_message(f"Demo: Playing {folder_name}...", 2)
-                
+
                 # Play videos for 1 minute (no looping in demo mode)
-                if self.player.start_video(video_files, folder_path, duration=60):
+                if self.player.start_video(video_files, folder_path, duration=60, ignore_hold=True):
                     # Wait for video playback to complete (max 65 seconds to account for startup)
                     if self.player.current_process:
                         try:
@@ -380,15 +392,13 @@ class BootMenu:
                         except subprocess.TimeoutExpired:
                             pass
                     self.player.stop_video(standby_hdmi=False)
-                    
+
                     # Pause for 30 seconds between folders
                     if folder_path != all_folders[-1][0]:  # Not the last folder
                         time.sleep(30)
-            
+
             self.show_message("Demo mode completed!", 3)
-            
+
         except Exception as e:
             self.logger.error(f"Error in demo mode: {e}")
             self.show_message(f"Error in demo mode: {str(e)}", 5)
-        finally:
-            self.player.stop_video(standby_hdmi=True)

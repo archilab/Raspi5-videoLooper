@@ -45,11 +45,51 @@ class IsFolderActive(unittest.TestCase):
     def test_invalid_name_is_never_active(self):
         self.check(False, 2026, 11, 5, 12, 0, name='videos')
 
-    def test_overnight_window_is_not_supported(self):
-        """Documents a current limit: a window that crosses midnight never plays"""
-        overnight = '2026-11-01_to_2026-11-30_2200_to_0600'
-        self.check(False, 2026, 11, 5, 23, 0, name=overnight)
-        self.check(False, 2026, 11, 5, 3, 0, name=overnight)
+
+class Overnight(unittest.TestCase):
+    NIGHT = '2026-11-01_to_2026-11-03_2200_to_0600'
+
+    def check(self, expected, *moment):
+        self.assertEqual(scheduler.is_folder_active(self.NIGHT, datetime(*moment)), expected, moment)
+
+    def test_before_and_after_midnight(self):
+        self.check(True, 2026, 11, 2, 23, 0)
+        self.check(True, 2026, 11, 3, 3, 0)
+
+    def test_daytime_is_outside(self):
+        self.check(False, 2026, 11, 2, 12, 0)
+        self.check(False, 2026, 11, 2, 21, 59)
+        self.check(False, 2026, 11, 2, 6, 1)
+
+    def test_edges(self):
+        self.check(True, 2026, 11, 1, 22, 0)
+        self.check(True, 2026, 11, 2, 6, 0)
+
+    def test_first_night_starts_in_the_evening(self):
+        self.check(False, 2026, 11, 1, 3, 0)
+
+    def test_last_night_runs_past_the_end_date(self):
+        self.check(True, 2026, 11, 3, 23, 0)
+        self.check(True, 2026, 11, 4, 5, 59)
+        self.check(False, 2026, 11, 4, 6, 1)
+        self.check(False, 2026, 11, 4, 23, 0)
+
+    def test_crosses_month_and_year_ends(self):
+        new_year = '2026-12-31_to_2026-12-31_2200_to_0200'
+        self.assertTrue(scheduler.is_folder_active(new_year, datetime(2027, 1, 1, 1, 0)))
+        self.assertFalse(scheduler.is_folder_active(new_year, datetime(2027, 1, 1, 3, 0)))
+
+    def test_equal_times_are_not_overnight(self):
+        name = '2026-11-01_to_2026-11-03_0900_to_0900'
+        self.assertTrue(scheduler.is_folder_active(name, datetime(2026, 11, 2, 9, 0)))
+        self.assertFalse(scheduler.is_folder_active(name, datetime(2026, 11, 2, 10, 0)))
+
+    def test_found_as_the_active_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            videos = Path(tmp) / 'videos'
+            make_tree(videos, {self.NIGHT: {'a.mp4': ''}})
+            found = scheduler.find_active_folder(videos, datetime(2026, 11, 4, 2, 0))
+            self.assertEqual(found[0].name, self.NIGHT)
 
 
 class FindingFolders(unittest.TestCase):

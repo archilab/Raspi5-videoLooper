@@ -254,6 +254,10 @@ class DemoMode(MenuTestCase):
         patcher = mock.patch('time.sleep')
         self.sleep = patcher.start()
         self.addCleanup(patcher.stop)
+        # Never take the real lock, which would pause a running service
+        patcher = mock.patch('time_entry.acquire_hold', return_value=mock.Mock())
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.player.start_video.return_value = True
 
     def test_plays_each_folder_for_a_minute_with_a_pause_between(self):
@@ -261,10 +265,44 @@ class DemoMode(MenuTestCase):
         self.menu.run_demo_mode()
         calls = self.player.start_video.call_args_list
         self.assertEqual([c.args[1].name for c in calls], [folder_name(1), folder_name(2)])
-        self.assertTrue(all(c.kwargs == {'duration': 60} for c in calls))
+        self.assertTrue(all(c.kwargs == {'duration': 60, 'ignore_hold': True} for c in calls))
         self.assertEqual(self.sleep.call_args_list.count(mock.call(30)), 1)
         self.player.wake_display.assert_called_once()
-        self.assertEqual(self.player.stop_video.call_args_list[-1], mock.call(standby_hdmi=True))
+
+    def test_waits_for_the_service_vlc_before_playing(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        order = []
+        self.player.wait_for_vlc_to_exit.side_effect = lambda: order.append('wait')
+        self.player.start_video.side_effect = lambda *a, **k: order.append('start') or True
+        self.menu.run_demo_mode()
+        self.assertEqual(order, ['wait', 'start'])
+
+    def test_hold_lasts_for_the_whole_demo(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        hold = mock.Mock()
+        order = []
+        hold.close.side_effect = lambda: order.append('released')
+        self.player.start_video.side_effect = lambda *a, **k: order.append('play') or True
+        self.player.stop_video.side_effect = lambda **k: order.append('stop')
+        with mock.patch('time_entry.acquire_hold', return_value=hold):
+            self.menu.run_demo_mode()
+        self.assertEqual(order[0], 'play')
+        self.assertEqual(order[-2:], ['stop', 'released'])
+
+    def test_leaves_the_display_to_the_service(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        self.menu.run_demo_mode()
+        for call in self.player.stop_video.call_args_list:
+            self.assertEqual(call, mock.call(standby_hdmi=False))
+
+    def test_hold_released_if_the_demo_fails(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        hold = mock.Mock()
+        self.player.start_video.side_effect = RuntimeError('boom')
+        with mock.patch('time_entry.acquire_hold', return_value=hold), self.assertLogs('boot_menu', 'ERROR'):
+            self.menu.run_demo_mode()
+        hold.close.assert_called_once()
+        self.assertIn('Error in demo mode', self.screen())
 
     def test_nothing_to_play(self):
         self.menu.run_demo_mode()

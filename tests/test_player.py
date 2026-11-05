@@ -66,6 +66,10 @@ class Starting(PlayerTestCase):
             self.assertFalse(self.player.start_video(['a.mp4'], self.folder))
         self.assertEqual(self.commands, [])
 
+    def test_demo_can_start_during_its_own_hold(self):
+        with mock.patch('time_entry.is_active', return_value=True):
+            self.assertTrue(self.player.start_video(['a.mp4'], self.folder, duration=60, ignore_hold=True))
+
     def test_display_woken_once(self):
         self.player.start_video(['a.mp4'], self.folder)
         self.player.start_video(['a.mp4'], self.folder)
@@ -87,6 +91,28 @@ class Starting(PlayerTestCase):
         import time
         self.player.start_video(['a.mp4'], self.folder)
         self.assertIn(mock.call(5), time.sleep.call_args_list)
+
+
+class WaitingForVlc(PlayerTestCase):
+    def pgrep(self, *returncodes):
+        codes = iter(returncodes)
+        return mock.patch.object(player.subprocess, 'run',
+                                 side_effect=lambda *a, **k: mock.Mock(returncode=next(codes)))
+
+    def test_returns_when_no_vlc_is_left(self):
+        with self.pgrep(0, 0, 1) as run:
+            self.assertTrue(self.player.wait_for_vlc_to_exit())
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(run.call_args.args[0], ['pgrep', '-x', 'vlc'])
+
+    def test_gives_up_after_the_timeout(self):
+        with mock.patch.object(player.subprocess, 'run', return_value=mock.Mock(returncode=0)), \
+                self.assertLogs('player', 'WARNING'):
+            self.assertFalse(self.player.wait_for_vlc_to_exit(timeout=0.01))
+
+    def test_missing_pgrep_does_not_stop_the_demo(self):
+        with mock.patch.object(player.subprocess, 'run', side_effect=FileNotFoundError('pgrep')):
+            self.assertFalse(self.player.wait_for_vlc_to_exit())
 
 
 class Stopping(PlayerTestCase):

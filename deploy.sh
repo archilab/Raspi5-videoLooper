@@ -25,7 +25,7 @@ for arg in "$@"; do
     esac
 done
 
-FILES=(console.py constants.py hdmi_controller.py projector_controller.py time_sync.py usb_sync.py
+FILES=(boot_menu.py console.py constants.py hdmi_controller.py player.py scheduler.py time_entry.py projector_controller.py time_sync.py usb_sync.py
        video_looper.py video-looper.service rtc-time-restore.service
        99-looper-rtc.rules)
 

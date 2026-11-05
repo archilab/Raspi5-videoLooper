@@ -1,0 +1,191 @@
+import logging
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import hdmi_controller
+import player
+import time_entry
+import video_looper
+from tests.helpers import FakeCec, FakeProcess, FakeProjector, make_hdmi
+
+FOLDER_A = (Path('/nonexistent/A'), ['a.mp4'])
+FOLDER_B = (Path('/nonexistent/B'), ['b.mp4'])
+
+
+class MainLoopTestCase(unittest.TestCase):
+    """The real loop and Player, with VLC, the display and the waits between passes faked"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.cec = FakeCec()
+        self.vlc = []
+        self.active = None
+        self.time_entry_active = False
+
+        def popen(cmd, **kwargs):
+            self.vlc.append(FakeProcess())
+            self.commands.append(cmd[-1])
+            return self.vlc[-1]
+
+        self.commands = []
+        for patcher in (mock.patch.object(hdmi_controller.subprocess, 'run', self.cec),
+                        mock.patch.object(player.subprocess, 'Popen', popen),
+                        mock.patch('time.sleep'),
+                        mock.patch.object(player.Player, 'clear_display'),
+                        mock.patch('scheduler.find_active_folder', side_effect=lambda path: self.active),
+                        mock.patch('time_entry.is_active', side_effect=lambda: self.time_entry_active),
+                        mock.patch.object(video_looper, 'CHECK_INTERVAL', 1)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        self.looper = video_looper.VideoLooper.__new__(video_looper.VideoLooper)
+        self.looper.logger = logging.getLogger('looper-test')
+        self.looper.videos_path = Path(self.tmp)
+        self.looper.running = True
+        self.looper.hdmi = make_hdmi()
+        self.looper.projector = FakeProjector()
+        self.looper.player = player.Player(self.looper.hdmi, self.looper.projector)
+        self.looper.usb_sync = SimpleNamespace(sync_on_boot=lambda: None)
+        self.looper.time_sync = mock.Mock()
+
+    def run_passes(self, *steps):
+        """Run the loop, doing one step after each pass: a callable, then checks, or None"""
+        steps = iter(steps)
+
+        def after_pass(_seconds):
+            try:
+                step = next(steps)
+            except StopIteration:
+                raise KeyboardInterrupt
+            if step:
+                step()
+
+        with mock.patch.object(video_looper, 'time', SimpleNamespace(sleep=after_pass)):
+            self.looper.run()
+
+    def set_active(self, folder):
+        self.active = folder
+
+
+class Decisions(MainLoopTestCase):
+    def test_starts_keeps_restarts_switches_and_stops(self):
+        self.active = FOLDER_A
+        counts = []
+        note = lambda: counts.append(len(self.vlc))
+        self.run_passes(
+            lambda: (note(),),                                    # first pass started A
+            lambda: (note(), self.vlc[-1].terminate()),           # still one; now VLC dies
+            lambda: (note(), self.set_active(FOLDER_B)),          # restarted; folder changes
+            lambda: (note(), self.set_active(None)),              # switched; schedule ends
+            note,                                                 # stopped, nothing new
+        )
+        self.assertEqual(counts, [1, 1, 2, 3, 3])
+        self.assertEqual(self.commands, ['a.mp4', 'a.mp4', 'b.mp4'])
+        self.assertFalse(self.vlc[-1].alive)
+
+    def test_failed_start_is_retried(self):
+        self.active = FOLDER_A
+        with mock.patch.object(player.subprocess, 'Popen', side_effect=OSError('no vlc')), \
+                self.assertLogs('player', 'ERROR'):
+            self.run_passes()
+        self.run_passes(None)
+        self.assertEqual(len(self.vlc), 1)
+
+    def test_usb_sync_failure_does_not_stop_the_player(self):
+        self.active = FOLDER_A
+        self.looper.usb_sync = SimpleNamespace(sync_on_boot=mock.Mock(side_effect=RuntimeError('bad drive')))
+        with self.assertLogs('looper-test', 'ERROR') as logs:
+            self.run_passes(None)
+        self.assertIn('bad drive', logs.output[0])
+        self.assertEqual(len(self.vlc), 1)
+
+    def test_loads_rtc_at_startup(self):
+        self.run_passes()
+        self.looper.time_sync.sync_time.assert_called_once()
+
+    def test_error_in_a_pass_is_logged_and_the_loop_continues(self):
+        results = [RuntimeError('oops'), None]
+        with mock.patch('scheduler.find_active_folder', side_effect=results + [None] * 5), \
+                self.assertLogs('looper-test', 'ERROR') as logs:
+            self.run_passes(None, None)
+        self.assertIn('oops', logs.output[0])
+
+
+class DisplayCommands(MainLoopTestCase):
+    def test_commands_only_on_changes(self):
+        idle = [None] * 99
+        playing = [None] * 99
+        self.run_passes(
+            *idle,
+            lambda: self.set_active(FOLDER_A), *playing,
+            lambda: self.vlc[-1].terminate(), None,               # crash: no display command
+            lambda: self.set_active(None), *idle,
+            lambda: self.set_active(FOLDER_A), *playing,
+        )
+        self.assertEqual(self.cec.sent, ['standby 0', 'on 0', 'standby 0', 'on 0', 'standby 0'])
+        self.assertEqual(len(self.vlc), 3)
+
+    def test_failed_wake_is_retried_while_playing(self):
+        self.active = FOLDER_A
+        self.cec.returncode = 1
+        def recover():
+            self.cec.returncode = 0
+        self.run_passes(None, recover, None, None)
+        self.assertEqual(self.cec.sent, ['on 0', 'on 0', 'on 0', 'standby 0'])
+
+
+class TimeEntryHold(MainLoopTestCase):
+    def setUp(self):
+        super().setUp()
+        for name in ('TIME_SET_REQUEST_FILE', 'TIME_SET_RESULT_FILE'):
+            patcher = mock.patch.object(time_entry, name, os.path.join(self.tmp, name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def hold(self):
+        self.time_entry_active = True
+
+    def release(self):
+        self.time_entry_active = False
+
+    def test_stops_video_keeps_display_awake_and_resumes(self):
+        self.active = FOLDER_A
+        seen = []
+        self.run_passes(
+            self.hold,                                            # playing, then the menu takes the hold
+            None,
+            lambda: seen.append((self.looper.player.is_playing(), len(self.vlc))),
+            self.release,
+            None,
+        )
+        self.assertEqual(seen, [(False, 1)])
+        self.assertEqual(len(self.vlc), 2)
+        self.assertEqual(self.cec.sent, ['on 0', 'standby 0'])
+
+    def test_wakes_display_for_the_menu_when_idle(self):
+        self.run_passes(self.hold, None)
+        self.assertEqual(self.cec.sent, ['standby 0', 'on 0', 'standby 0'])
+
+    def test_display_goes_back_to_standby_after_the_hold(self):
+        seen = []
+        self.run_passes(self.hold, None, self.release, None, lambda: seen.append(self.looper.hdmi.last_state))
+        self.assertEqual(seen, [hdmi_controller.STATE_STANDBY])
+
+    def test_processes_the_time_request_during_the_hold(self):
+        self.looper.time_sync.set_time_manually.return_value = True
+
+        def send_request():
+            self.hold()
+            with open(time_entry.TIME_SET_REQUEST_FILE, 'w') as f:
+                f.write('2026-11-05 12:00:00')
+
+        self.run_passes(send_request, None, self.release)
+        self.looper.time_sync.set_time_manually.assert_called_once_with('2026-11-05 12:00:00')
+        with open(time_entry.TIME_SET_RESULT_FILE) as f:
+            self.assertEqual(f.read(), 'ok')

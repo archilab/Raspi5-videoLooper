@@ -18,7 +18,7 @@ from player import Player
 from projector_controller import ProjectorController
 from time_sync import TimeSyncManager
 from usb_sync import USBSync
-from constants import DEFAULT_VIDEOS_PATH, CHECK_INTERVAL, DEFAULT_SERIAL_PORT
+from constants import BOOT_MENU_GRACE, CHECK_INTERVAL, DEFAULT_SERIAL_PORT, DEFAULT_VIDEOS_PATH
 
 
 class VideoLooper:
@@ -51,12 +51,22 @@ class VideoLooper:
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         self.running = False
-        self.player.stop_video(standby_hdmi=True)
-        self.projector.disconnect()
+        self.shut_down()
         sys.exit(0)
+
+    def shut_down(self):
+        """Stop playback and leave the HDMI signal on, so the console can be used"""
+        self.player.stop_video(standby_hdmi=False)
+        self.projector.disconnect()
+        if self.hdmi.is_available():
+            self.hdmi.wake_hdmi()
 
     def run(self):
         """Main loop"""
+        started = time.monotonic()
+        if not self.hdmi.is_available():
+            self.logger.warning("HDMI signal can't be switched: no write access to the blank file")
+
         try:
             self.usb_sync.sync_on_boot()
         except Exception as e:
@@ -93,18 +103,18 @@ class VideoLooper:
                         started = self.player.start_video(video_files, folder_path)
                         current_folder = folder_path if started else None
                     elif self.hdmi.is_available():
-                        # Video is playing correctly. This only sends a command if
-                        # the last attempt to wake the display failed.
+                        # Video is playing correctly. This only does anything if
+                        # the last attempt to switch the signal on failed.
                         self.hdmi.wake_hdmi()
                 else:
-                    # No active folder - stop video and put HDMI in standby
+                    # No active folder - stop video and switch the HDMI signal off
                     if self.player.current_folder is not None or self.player.is_playing():
                         # Video is playing but folder is no longer active - stop it
                         self.player.stop_video(standby_hdmi=True)
                         current_folder = None
-                    elif self.hdmi.is_available():
-                        # Nothing to play. This only sends a command if the display
-                        # was last told to be on, or the last attempt failed.
+                    elif self.hdmi.is_available() and time.monotonic() - started >= BOOT_MENU_GRACE:
+                        # Nothing to play. This only does anything if the signal was
+                        # last on, or the last attempt to switch it off failed.
                         self.hdmi.standby_hdmi()
 
                 # Wait for the next check, but react to the menu within a second
@@ -119,7 +129,7 @@ class VideoLooper:
                 self.logger.error(f"Error in main loop: {e}")
                 time.sleep(60)
         
-        self.player.stop_video(standby_hdmi=True)
+        self.shut_down()
 
 
 def load_projector_config(looper):

@@ -1,6 +1,5 @@
 import os
 import pty
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,64 +7,55 @@ from unittest import mock
 
 import hdmi_controller
 import projector_controller
-from tests.helpers import FakeCec, make_hdmi
 
 
 class HdmiController(unittest.TestCase):
     def setUp(self):
-        self.cec = FakeCec()
-        for patcher in (mock.patch.object(hdmi_controller.subprocess, 'run', self.cec), mock.patch('time.sleep')):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.blank = Path(tmp.name) / 'blank'
+        self.blank.write_text('')
+        patcher = mock.patch.object(hdmi_controller, 'BLANK_FILE', str(self.blank))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.writes = []
+        self.hdmi = hdmi_controller.HDMIController()
 
-    def test_one_command_per_change(self):
-        hdmi = make_hdmi()
-        self.assertIsNone(hdmi.last_state)
+    def test_writes_the_kernel_values(self):
+        self.assertTrue(self.hdmi.standby_hdmi())
+        self.assertEqual(self.blank.read_text(), '4')
+        self.assertTrue(self.hdmi.wake_hdmi())
+        self.assertEqual(self.blank.read_text(), '0')
+
+    def test_first_change_is_always_written(self):
+        self.assertIsNone(self.hdmi.last_state)
+        self.hdmi.wake_hdmi()
+        self.assertEqual(self.blank.read_text(), '0')
+
+    def test_writes_only_on_changes(self):
+        self.hdmi.wake_hdmi()
+        self.blank.write_text('untouched')
         for _ in range(5):
-            self.assertTrue(hdmi.wake_hdmi())
-        self.assertEqual(self.cec.sent, ['on 0'])
-        hdmi.standby_hdmi()
-        hdmi.standby_hdmi()
-        hdmi.wake_hdmi()
-        self.assertEqual(self.cec.sent, ['on 0', 'standby 0', 'on 0'])
+            self.assertTrue(self.hdmi.wake_hdmi())
+        self.assertEqual(self.blank.read_text(), 'untouched')
+        self.hdmi.standby_hdmi()
+        self.assertEqual(self.blank.read_text(), '4')
 
-    def test_first_command_is_always_sent(self):
-        make_hdmi().standby_hdmi()
-        self.assertEqual(self.cec.sent, ['standby 0'])
+    def test_failed_change_is_retried_until_it_works(self):
+        self.hdmi.wake_hdmi()
+        working = self.blank
+        with mock.patch.object(hdmi_controller, 'BLANK_FILE', str(working.parent / 'missing' / 'blank')), \
+                self.assertLogs('hdmi_controller', 'WARNING'):
+            self.assertFalse(self.hdmi.standby_hdmi())
+            self.assertFalse(self.hdmi.standby_hdmi())
+        self.assertEqual(self.hdmi.last_state, hdmi_controller.STATE_ON)
+        self.assertTrue(self.hdmi.standby_hdmi())
+        self.assertEqual(working.read_text(), '4')
 
-    def test_failed_command_is_retried_until_it_works(self):
-        hdmi = make_hdmi()
-        hdmi.wake_hdmi()
-        self.cec.sent.clear()
-        self.cec.returncode = 1
-        self.assertFalse(hdmi.standby_hdmi())
-        self.assertFalse(hdmi.standby_hdmi())
-        self.assertEqual(hdmi.last_state, hdmi_controller.STATE_ON)
-        self.cec.returncode = 0
-        self.assertTrue(hdmi.standby_hdmi())
-        self.assertTrue(hdmi.standby_hdmi())
-        self.assertEqual(self.cec.sent, ['standby 0'] * 3)
-
-    def test_runs_directly_without_a_shell(self):
-        with mock.patch.object(hdmi_controller.subprocess, 'run', return_value=mock.Mock(returncode=0)) as run:
-            make_hdmi().wake_hdmi()
-        self.assertEqual(run.call_args.args[0], ['/x/cec-client', '-s', '-d', '1'])
-        self.assertEqual(run.call_args.kwargs['input'], 'on 0\n')
-        self.assertNotIn('shell', run.call_args.kwargs)
-
-    def test_timeout_is_a_failure(self):
-        def slow(cmd, **kwargs):
-            raise subprocess.TimeoutExpired(cmd, 5)
-
-        with mock.patch.object(hdmi_controller.subprocess, 'run', slow):
-            self.assertFalse(make_hdmi().wake_hdmi())
-
-    def test_without_cec_client(self):
-        hdmi = make_hdmi()
-        hdmi.cec_client_path = None
-        self.assertFalse(hdmi.is_available())
-        self.assertFalse(hdmi.wake_hdmi())
-        self.assertEqual(self.cec.sent, [])
+    def test_availability_follows_write_access(self):
+        self.assertTrue(self.hdmi.is_available())
+        with mock.patch.object(hdmi_controller, 'BLANK_FILE', str(self.blank.parent / 'missing')):
+            self.assertFalse(self.hdmi.is_available())
 
 
 class ProjectorErrors(unittest.TestCase):

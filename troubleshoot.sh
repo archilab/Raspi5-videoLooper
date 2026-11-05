@@ -189,11 +189,14 @@ check_display() {
         echo "$(basename "$(dirname "$status_file")"): $(cat "$status_file")"
     done
 
-    if command_exists cec-client; then
-        echo "Devices answering CEC (only the Pi itself means the display isn't answering):"
-        echo scan | cec-client -s -d 1 | grep -E "^device|^osd string"
+    for dpms_file in /sys/class/drm/card*-HDMI-*/dpms; do
+        echo "$(basename "$(dirname "$dpms_file")") signal: $(cat "$dpms_file")"
+    done
+
+    if sudo -n -u looper test -w /sys/class/graphics/fb0/blank 2>/dev/null; then
+        echo -e "${GREEN}✓ looper can switch the HDMI signal${NC}"
     else
-        echo -e "${YELLOW}⚠ cec-client is not installed${NC}"
+        echo -e "${YELLOW}⚠ looper can't switch the HDMI signal, or this couldn't be checked without sudo${NC}"
     fi
 }
 

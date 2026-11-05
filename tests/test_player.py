@@ -1,12 +1,10 @@
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-import hdmi_controller
 import player
-from tests.helpers import FakeCec, FakeProcess, FakeProjector, make_hdmi
+from tests.helpers import FakeDisplay, FakeProcess, FakeProjector, make_hdmi
 
 LOOP_COMMAND = ['cvlc', '--intf', 'dummy', '--fullscreen', '--loop', '--no-osd', '--no-audio', '--quiet',
                 'a.mp4', 'b.mp4']
@@ -19,22 +17,21 @@ class PlayerTestCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.folder = Path(tmp.name)
-        self.cec = FakeCec()
+        self.display = FakeDisplay()
         self.commands = []
 
         def popen(cmd, **kwargs):
             self.commands.append(cmd)
             return FakeProcess()
 
-        for patcher in (mock.patch.object(hdmi_controller.subprocess, 'run', self.cec),
-                        mock.patch.object(player.subprocess, 'Popen', popen),
+        for patcher in (mock.patch.object(player.subprocess, 'Popen', popen),
                         mock.patch('time.sleep'),
                         mock.patch('time_entry.is_active', return_value=False),
                         mock.patch.object(player.Player, 'clear_display')):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.projector = FakeProjector()
-        self.player = player.Player(make_hdmi(), self.projector)
+        self.player = player.Player(make_hdmi(self.display), self.projector)
 
     def enable_projector(self):
         (self.folder / 'projector.txt').write_text('enable_projector=true')
@@ -73,7 +70,7 @@ class Starting(PlayerTestCase):
     def test_display_woken_once(self):
         self.player.start_video(['a.mp4'], self.folder)
         self.player.start_video(['a.mp4'], self.folder)
-        self.assertEqual(self.cec.sent, ['on 0'])
+        self.assertEqual(self.display.sent, ['on'])
 
     def test_projector_started_once_when_enabled(self):
         self.enable_projector()
@@ -125,12 +122,12 @@ class Stopping(PlayerTestCase):
         self.assertIsNone(self.player.current_process)
         self.assertIsNone(self.player.current_folder)
         self.assertEqual(self.projector.calls, ['connect', 'start', 'stop', 'disconnect'])
-        self.assertEqual(self.cec.sent, ['on 0'])
+        self.assertEqual(self.display.sent, ['on'])
 
     def test_standby(self):
         self.player.start_video(['a.mp4'], self.folder)
         self.player.stop_video(standby_hdmi=True)
-        self.assertEqual(self.cec.sent, ['on 0', 'standby 0'])
+        self.assertEqual(self.display.sent, ['on', 'off'])
         self.player.clear_display.assert_called_once()
 
     def test_stuck_vlc_is_killed(self):
@@ -140,7 +137,7 @@ class Stopping(PlayerTestCase):
 
     def test_stopping_when_idle_is_harmless(self):
         self.player.stop_video()
-        self.assertEqual(self.cec.sent, [])
+        self.assertEqual(self.display.sent, [])
         self.assertEqual(self.projector.calls, [])
 
     def test_crashed_vlc_is_not_playing(self):

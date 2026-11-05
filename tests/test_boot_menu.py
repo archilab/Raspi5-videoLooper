@@ -1,4 +1,3 @@
-import logging
 import os
 import pty
 import select
@@ -13,7 +12,6 @@ from unittest import mock
 
 import boot_menu
 import console
-import time_entry
 from tests.helpers import folder_name, make_tree
 
 HEADER = 'Set RTC Time\n' + '=' * 60 + '\n\n'

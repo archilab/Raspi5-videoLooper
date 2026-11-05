@@ -1,7 +1,6 @@
 """Shared fakes, so the tests never touch the real clock, display, projector or VLC"""
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import hdmi_controller
 
@@ -50,23 +49,22 @@ class FakeProcess:
         return 0
 
 
-class FakeCec:
-    """Replaces subprocess.run and records the CEC commands sent"""
+class FakeDisplay:
+    """Records HDMI signal changes as 'on' and 'off', and can be told to fail"""
 
     def __init__(self):
         self.sent = []
-        self.returncode = 0
+        self.fail = False
 
-    def __call__(self, cmd, input=None, **kwargs):
-        if cmd[0] == '/x/cec-client':
-            self.sent.append(input.strip())
-            return SimpleNamespace(returncode=self.returncode, stdout='', stderr='')
-        return SimpleNamespace(returncode=1, stdout='', stderr='')
+    def write(self, value):
+        self.sent.append('on' if value == hdmi_controller.FB_BLANK_UNBLANK else 'off')
+        return not self.fail
 
 
-def make_hdmi():
+def make_hdmi(display):
     hdmi = hdmi_controller.HDMIController()
-    hdmi.cec_client_path = '/x/cec-client'
+    hdmi._write_blank = display.write
+    hdmi.is_available = lambda: True
     return hdmi
 
 

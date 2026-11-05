@@ -40,6 +40,10 @@ class Packaging(unittest.TestCase):
                 copied.update(word for word in line.split() if word.endswith('.py'))
         self.assertEqual(sorted(copied), MODULES)
 
+    def test_service_grants_access_to_switch_the_hdmi_signal(self):
+        unit = (ROOT / 'video-looper.service').read_text()
+        self.assertIn('chmod g+w /sys/class/graphics/fb0/blank', unit)
+
     def test_install_and_deploy_ship_the_rtc_rule(self):
         self.assertIn('99-looper-rtc.rules', (ROOT / 'install.sh').read_text())
         self.assertIn('99-looper-rtc.rules', (ROOT / 'deploy.sh').read_text())

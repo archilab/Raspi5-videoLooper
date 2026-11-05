@@ -151,7 +151,6 @@ sudo apt install -y \
     ffmpeg \
     python3-requests \
     python3-serial \
-    cec-utils \
     util-linux \
     util-linux-extra  
 

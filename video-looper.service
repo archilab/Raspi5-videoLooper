@@ -8,6 +8,7 @@ Type=simple
 User=looper
 Group=looper
 WorkingDirectory=/home/looper/video_looper
+ExecStartPre=-+/bin/sh -c 'for i in $$(seq 1 30); do [ -e /sys/class/graphics/fb0/blank ] && break; sleep 1; done; chgrp looper /sys/class/graphics/fb0/blank; chmod g+w /sys/class/graphics/fb0/blank'
 ExecStart=/usr/bin/python3 /home/looper/video_looper/video_looper.py
 CapabilityBoundingSet=CAP_SYS_TIME CAP_WAKE_ALARM
 AmbientCapabilities=CAP_SYS_TIME CAP_WAKE_ALARM

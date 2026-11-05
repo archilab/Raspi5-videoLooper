@@ -7,7 +7,7 @@ Unattended video playback for a Raspberry Pi 5 driving a screen or projector, fo
 - Updates content from a USB drive when the service starts
 - Keeps time with the Pi's battery-backed real-time clock (RTC), with no network needed
 - Switches a projector on and off over USB serial, with settings per folder
-- Puts an HDMI display in standby outside scheduled hours, if the display supports CEC
+- Switches the HDMI signal off outside scheduled hours, so most displays go to sleep
 
 ## Scheduling
 
@@ -50,7 +50,7 @@ chmod +x install.sh
 
 The script changes the whole system, so read it first on a Pi that has other uses. It:
 
-- Upgrades all packages, and installs VLC, `cec-utils`, `python3-serial` and others
+- Upgrades all packages, and installs VLC, `python3-serial` and others
 - Creates the `looper` user, which runs everything, and sets it to log in automatically on the HDMI console
 - If `looper` already exists and `admin` doesn't, creates `admin` with **passwordless sudo**
 - **Disables NTP**, because the system runs on the RTC alone
@@ -106,15 +106,21 @@ Never enable this with a non-rechargeable cell such as a CR2032.
 
 ## Display control
 
-The service wakes the display before playing and puts it in standby when nothing is scheduled, using HDMI-CEC. A command is only sent when the desired state changes, so turning the display on or off by hand isn't undone until the next change.
+The service switches the HDMI signal on before playing and off when nothing is scheduled. It does this through the kernel's framebuffer blanking, without needing any support from the display. **What the display does with no signal is up to the display:** most go to sleep, some show a "no signal" message, and some projectors have their own settings for it.
 
-**Not every display responds to CEC**, and many monitors and projectors ignore it. Those displays stay on outside scheduled hours, showing the console or a blank screen. On a TV, CEC may be a setting under a brand name such as Anynet+ or Bravia Sync. To see what the Pi can detect:
+- **After starting:** the signal stays on for the first 60 seconds after the service starts, so the boot menu is visible even when nothing is scheduled. To reach the menu after the signal is off, reboot.
+- **When the service stops:** the signal is switched back on, so the console can be used.
+- **While the signal is off:** keyboard input doesn't bring it back, and neither does turning the display on by hand. Restart the service to get it back:
 
 ```bash
-echo scan | cec-client -s -d 1
+sudo systemctl restart video-looper
 ```
 
-If the scan only lists the Pi itself, the display isn't answering CEC. The display may still obey commands without answering, so check whether it actually goes to standby.
+To check the signal state from another machine, read this file, which shows `On` or `Off`:
+
+```bash
+cat /sys/class/drm/card1-HDMI-A-1/dpms
+```
 
 ## Projector control
 
@@ -189,7 +195,8 @@ sudo journalctl -u video-looper -f
 | Wrong time after power loss | The RTC battery, under Time above |
 | New folders didn't arrive | The sync only runs at service start. Check with `--usb-sync-test` and `mount \| grep media` |
 | Local folder disappeared | It wasn't on the USB drive when the service started |
-| Display stays on after hours | The display may not respond to CEC, under Display control above |
+| Display stays on after hours | Check whether the signal is really `Off`, under Display control above. If it is, check the display's no-signal or power-saving settings |
+| Screen is dark when it should show something | The signal is off because nothing is scheduled. Run `--test` and see Display control above |
 | Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual |
 | Service won't start | `sudo journalctl -u video-looper -n 50` |
 
@@ -210,7 +217,7 @@ The boot menu is a separate process started by the console login. When it needs 
 | `time_entry.py` | The hold and time handoff between menu and service |
 | `time_sync.py` | Reads and writes the RTC and system clock |
 | `usb_sync.py` | USB detection, sync planning and safe copying |
-| `hdmi_controller.py` | CEC display commands |
+| `hdmi_controller.py` | Switches the HDMI signal on and off |
 | `projector_controller.py` | Serial projector commands |
 | `console.py` | Writes to the HDMI console |
 | `constants.py` | Shared settings, like paths and the 30-second check interval |

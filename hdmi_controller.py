@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-HDMI Control Module using CEC (Consumer Electronics Control)
-Handles HDMI display power management using cec-client from cec-utils
+Switches the HDMI signal on and off, using the kernel's framebuffer blanking.
+With no signal, most displays go to sleep by themselves.
 
-Each cec-client run takes about 3 seconds, and displays can't be relied on to report
-their power state, so this remembers the last command and only sends changes.
+The video-looper service gives the looper user write access to the blank file when it
+starts. VLC has to have exited first: the kernel refuses while VLC is using the display.
 """
 
-import subprocess
 import logging
-import shutil
-import time
+import os
+
+BLANK_FILE = '/sys/class/graphics/fb0/blank'
+FB_BLANK_UNBLANK = 0
+FB_BLANK_POWERDOWN = 4
 
 STATE_STANDBY = 0
 STATE_ON = 1
@@ -19,64 +21,44 @@ STATE_ON = 1
 class HDMIController:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.cec_client_path = shutil.which('cec-client')
-        self.last_state = None  # Last state successfully sent; None until the first command
+        self.last_state = None  # Last state successfully set; None until the first change
 
-    def _send_cec_command(self, command):
-        """
-        Send a CEC command to control HDMI display
-        Args:
-            command: CEC command string (e.g., "standby 0", "on 0")
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        if not self.cec_client_path:
-            return False
-
+    def _write_blank(self, value):
+        """Write to the kernel's blank file, returning True if it worked"""
         try:
-            result = subprocess.run(
-                [self.cec_client_path, '-s', '-d', '1'],
-                input=f"{command}\n",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5,
-                text=True
-            )
-            return result.returncode == 0
-        except (OSError, subprocess.SubprocessError):
+            with open(BLANK_FILE, 'w') as f:
+                f.write(str(value))
+            return True
+        except OSError as e:
+            self.logger.warning(f"Could not switch the HDMI signal: {e}")
             return False
 
     def set_hdmi_power(self, state):
         """
-        Set HDMI display power state using CEC, if it differs from the last one sent.
-        A failed command isn't remembered, so calling again retries it.
+        Switch the HDMI signal, if it differs from the last state set.
+        A failure isn't remembered, so calling again retries it.
         Args:
             state: STATE_STANDBY or STATE_ON
         Returns:
-            bool: True if the display was told to be in this state, False otherwise
+            bool: True if the signal is in this state, False otherwise
         """
         if state == self.last_state:
             return True
 
-        if not self.cec_client_path:
-            self.logger.warning("cec-client not available, cannot control HDMI")
-            return False
-
-        command = "on 0" if state == STATE_ON else "standby 0"
-        if not self._send_cec_command(command):
+        value = FB_BLANK_UNBLANK if state == STATE_ON else FB_BLANK_POWERDOWN
+        if not self._write_blank(value):
             return False
         self.last_state = state
-        time.sleep(1)
         return True
 
     def wake_hdmi(self):
-        """Wake HDMI display (set to active)"""
+        """Switch the HDMI signal on"""
         return self.set_hdmi_power(STATE_ON)
 
     def standby_hdmi(self):
-        """Put HDMI display in standby (set to off)"""
+        """Switch the HDMI signal off"""
         return self.set_hdmi_power(STATE_STANDBY)
 
     def is_available(self):
-        """Check if HDMI control is available"""
-        return self.cec_client_path is not None
+        """Check if the HDMI signal can be switched"""
+        return os.access(BLANK_FILE, os.W_OK)

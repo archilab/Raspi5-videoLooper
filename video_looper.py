@@ -13,6 +13,7 @@ import re
 import select
 import termios
 import tty
+import fcntl
 from datetime import datetime, timedelta
 from pathlib import Path
 import signal
@@ -24,7 +25,8 @@ from usb_sync import USBSync
 from constants import (
     DEFAULT_VIDEOS_PATH, DEFAULT_LOG_FILE, VIDEO_EXTENSIONS,
     PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT,
-    CHECK_INTERVAL, HDMI_WAKE_DELAY
+    CHECK_INTERVAL, HDMI_WAKE_DELAY, TIME_ENTRY_LOCK_FILE,
+    TIME_SET_REQUEST_FILE, TIME_SET_RESULT_FILE, TIME_SET_TIMEOUT
 )
 
 class VideoLooper:
@@ -537,7 +539,99 @@ class VideoLooper:
         except (PermissionError, OSError):
             pass
     
+    def _acquire_time_entry_hold(self):
+        """
+        Tell the looper service to hold the video while the time is being entered.
+        Uses a file lock, which the kernel releases even if this process crashes.
+        Returns the open lock file (close it to release), or None if it can't be taken.
+        """
+        try:
+            lock_file = open(TIME_ENTRY_LOCK_FILE, 'a')
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            return lock_file
+        except OSError as e:
+            self.logger.error(f"Could not hold video during time entry: {e}")
+            return None
+
+    def is_time_entry_active(self):
+        """Check whether the boot menu currently holds the time entry lock"""
+        try:
+            with open(TIME_ENTRY_LOCK_FILE, 'a') as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            return False
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+
+    def _write_file_atomic(self, path, text):
+        """Write a small file so a reader never sees it half-written"""
+        temp_path = f"{path}.tmp"
+        with open(temp_path, 'w') as f:
+            f.write(text)
+        os.replace(temp_path, path)
+
+    def _remove_file(self, path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    def _request_time_set(self, time_str):
+        """
+        Menu side: ask the service to set the clock, since only it has permission.
+        Returns True once the service confirms the system clock and RTC are both set.
+        """
+        self._remove_file(TIME_SET_RESULT_FILE)
+        try:
+            self._write_file_atomic(TIME_SET_REQUEST_FILE, time_str)
+        except OSError as e:
+            self.logger.error(f"Could not send time request: {e}")
+            return False
+
+        deadline = time.monotonic() + TIME_SET_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                with open(TIME_SET_RESULT_FILE) as f:
+                    result = f.read().strip()
+                self._remove_file(TIME_SET_RESULT_FILE)
+                return result == 'ok'
+            except OSError:
+                time.sleep(0.2)
+
+        # Service isn't answering: don't leave a request that could apply later
+        self._remove_file(TIME_SET_REQUEST_FILE)
+        self.logger.error("Video looper service did not answer the time request")
+        return False
+
+    def _process_time_request(self):
+        """Service side: set the clock if the menu has asked for it"""
+        try:
+            # /dev/shm is writable by every user, so only accept our own user's requests
+            if os.stat(TIME_SET_REQUEST_FILE).st_uid != os.getuid():
+                return
+            with open(TIME_SET_REQUEST_FILE) as f:
+                time_str = f.read().strip()
+        except OSError:
+            return
+        self._remove_file(TIME_SET_REQUEST_FILE)
+
+        success = self.time_sync.set_time_manually(time_str)
+        try:
+            self._write_file_atomic(TIME_SET_RESULT_FILE, 'ok' if success else 'failed')
+        except OSError as e:
+            self.logger.error(f"Could not report time result: {e}")
+
     def handle_manual_time_setting(self):
+        """Hold the video until the time has been entered and set (or entry is cancelled)"""
+        hold = self._acquire_time_entry_hold()
+        try:
+            self._enter_and_set_time()
+        finally:
+            if hold:
+                hold.close()
+
+    def _enter_and_set_time(self):
         """Handle manual RTC time setting - step-by-step entry"""
         try:
             # Get Year
@@ -610,8 +704,8 @@ class VideoLooper:
             except (PermissionError, OSError):
                 pass
             
-            # Set time (this will set system time and write to RTC)
-            if self.time_sync.set_time_manually(time_str):
+            # The service sets the system time and writes it to the RTC
+            if self._request_time_set(time_str):
                 self.show_message(f"Time set successfully!\n{time_str}\nWritten to RTC.", 3)
             else:
                 # Log the error for debugging
@@ -738,6 +832,10 @@ class VideoLooper:
                     self.logger.error("Failed to start projector")
             self.handle_video_start_delay(folder_path)
         
+        # Time entry may have started during the delays above
+        if self.is_time_entry_active():
+            return False
+
         # Create VLC command using cvlc (command-line VLC)
         vlc_cmd = [
             'cvlc',
@@ -932,8 +1030,23 @@ class VideoLooper:
         self.time_sync.start_background_sync()
         
         current_folder = None
+        time_entry_held = False
         while self.running:
             try:
+                # Boot menu is setting the time: keep the screen free and awake for it,
+                # then re-check the schedule against the new time as soon as it's done
+                if self.is_time_entry_active():
+                    if not time_entry_held:
+                        time_entry_held = True
+                        self.stop_video(standby_hdmi=False)
+                        current_folder = None
+                        if self.hdmi.is_available():
+                            self.hdmi.wake_hdmi()
+                    self._process_time_request()
+                    time.sleep(0.5)
+                    continue
+                time_entry_held = False
+
                 active_folder_info = self.find_active_folder()
                 
                 if active_folder_info:
@@ -978,8 +1091,12 @@ class VideoLooper:
                         if hdmi_state == 1:
                             self.hdmi.standby_hdmi()
                 
-                time.sleep(CHECK_INTERVAL)
-                
+                # Wait for the next check, but react to time entry within a second
+                for _ in range(CHECK_INTERVAL):
+                    if self.is_time_entry_active():
+                        break
+                    time.sleep(1)
+
             except KeyboardInterrupt:
                 break
             except Exception as e:

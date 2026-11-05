@@ -7,6 +7,12 @@ from typing import FrozenSet
 DEFAULT_VIDEOS_PATH = "/home/looper/videos"
 DEFAULT_LOG_FILE = "/var/log/video_looper.log"
 DEFAULT_INSTALL_DIR = "/home/looper/video_looper"
+# Locked by the boot menu while the time is being entered; in RAM, so no SD card writes
+TIME_ENTRY_LOCK_FILE = "/dev/shm/video_looper_time_entry.lock"
+# The menu has no permission to change the clock, so it asks the service through these
+TIME_SET_REQUEST_FILE = "/dev/shm/video_looper_time_request"
+TIME_SET_RESULT_FILE = "/dev/shm/video_looper_time_result"
+TIME_SET_TIMEOUT = 20  # seconds the menu waits for the service to answer
 
 # Video formats
 VIDEO_EXTENSIONS: FrozenSet[str] = frozenset({

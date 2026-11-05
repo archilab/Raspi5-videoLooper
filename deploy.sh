@@ -26,7 +26,8 @@ for arg in "$@"; do
 done
 
 FILES=(constants.py hdmi_controller.py projector_controller.py time_sync.py usb_sync.py
-       video_looper.py config.conf video-looper.service rtc-time-restore.service)
+       video_looper.py config.conf video-looper.service rtc-time-restore.service
+       99-looper-rtc.rules)
 
 # ConnectionAttempts: the Pi's Wi-Fi sometimes answers "No route to host" on the first try.
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=5 "$HOST")
@@ -41,6 +42,7 @@ trap 'rm -rf "$stage"' EXIT
 
 app=/home/looper/video_looper
 units=/etc/systemd/system
+rules=/etc/udev/rules.d
 
 # Same substitution install.sh makes, so the unit compares equal to the installed one.
 sed -i "s|/run/user/1000|/run/user/$(id -u looper)|g" "$stage/video-looper.service"
@@ -49,19 +51,21 @@ for f in "$stage"/*.py; do
     python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$f"
 done
 
-app_changed=() units_changed=()
+app_changed=() units_changed=() rules_changed=()
 for f in "$stage"/*; do
     name=${f##*/}
     case "$name" in
         *.service) sudo -n cmp -s "$f" "$units/$name" || units_changed+=("$name") ;;
+        *.rules)   sudo -n cmp -s "$f" "$rules/$name" || rules_changed+=("$name") ;;
         *)         sudo -n cmp -s "$f" "$app/$name"   || app_changed+=("$name") ;;
     esac
 done
+changed_count=$(( ${#app_changed[@]} + ${#units_changed[@]} + ${#rules_changed[@]} ))
 
-if [ $(( ${#app_changed[@]} + ${#units_changed[@]} )) -eq 0 ]; then
+if [ "$changed_count" -eq 0 ]; then
     echo "Pi is up to date."
 else
-    echo "Differs from Pi: ${app_changed[*]:-} ${units_changed[*]:-}"
+    echo "Differs from Pi: ${app_changed[*]:-} ${units_changed[*]:-} ${rules_changed[*]:-}"
 fi
 
 [ "$mode" = check ] && exit 0
@@ -74,8 +78,15 @@ for name in ${units_changed[@]+"${units_changed[@]}"}; do
     sudo -n install -o root -g root -m 644 "$stage/$name" "$units/$name"
 done
 [ ${#units_changed[@]} -eq 0 ] || sudo -n systemctl daemon-reload
+for name in ${rules_changed[@]+"${rules_changed[@]}"}; do
+    sudo -n install -o root -g root -m 644 "$stage/$name" "$rules/$name"
+done
+if [ ${#rules_changed[@]} -ne 0 ]; then
+    sudo -n udevadm control --reload-rules
+    sudo -n udevadm trigger --subsystem-match=rtc --action=change
+fi
 
-if [ "$restart" = 0 ] && [ $(( ${#app_changed[@]} + ${#units_changed[@]} )) -eq 0 ]; then
+if [ "$restart" = 0 ] && [ "$changed_count" -eq 0 ]; then
     echo "Nothing changed, service not restarted."
     exit 0
 fi

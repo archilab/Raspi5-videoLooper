@@ -292,6 +292,12 @@ else
     done
 fi
 
+# Let the looper service write the RTC when the time is set from the boot menu
+echo -e "${GREEN}Giving looper access to the RTC device...${NC}"
+sudo install -o root -g root -m 644 99-looper-rtc.rules /etc/udev/rules.d/99-looper-rtc.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=rtc --action=change
+
 # Configure system to use RTC only
 echo -e "${GREEN}Configuring system for RTC-only mode...${NC}"
 # Ensure RTC is set to local time (not UTC) if needed

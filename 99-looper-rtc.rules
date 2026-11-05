@@ -1,0 +1,2 @@
+# Let the looper service read and write the RTC without root
+SUBSYSTEM=="rtc", GROUP="looper", MODE="0660"

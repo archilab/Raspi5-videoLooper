@@ -79,7 +79,8 @@ class TimeSyncManager:
             return False
         try:
             result = subprocess.run(
-                self._sudo_cmd([self.hwclock_cmd, "--systohc"]),
+                # --noadjfile: /etc/adjtime is root-only, and the RTC is kept in UTC
+                self._sudo_cmd([self.hwclock_cmd, "--systohc", "--noadjfile", "--utc"]),
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -296,9 +297,8 @@ class TimeSyncManager:
             
             # Method 1: Try direct system call first (if capability is available)
             if self._set_system_time_direct(dt):
-                if self.write_system_time_to_rtc():
-                    return True
-                return True  # Still consider it success since system time was set
+                # Without the RTC the new time would be lost on the next boot
+                return self.write_system_time_to_rtc()
             
             # Method 2: Try to write to RTC via /sys/class/rtc (since we can read from it)
             rtc_written = False

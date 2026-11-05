@@ -102,6 +102,7 @@ If you prefer manual installation:
    sudo cp time_sync.py /home/looper/video_looper/
    sudo cp projector_controller.py /home/looper/video_looper/
    sudo cp hdmi_controller.py /home/looper/video_looper/
+   sudo cp console.py constants.py /home/looper/video_looper/
    sudo cp usb_sync.py /home/looper/video_looper/
    sudo cp video-looper.service /etc/systemd/system/
    ```
@@ -766,6 +767,7 @@ Raspi5-videoLooper/
 ├── time_sync.py             # Time synchronization module
 ├── projector_controller.py  # Projector control module
 ├── hdmi_controller.py       # HDMI display control module (CEC)
+├── console.py               # Shows text on the HDMI console
 ├── usb_sync.py              # USB drive synchronization module
 ├── video-looper.service     # Systemd service file
 ├── install.sh              # Installation script

@@ -5,12 +5,14 @@ Synchronizes video folders between USB drive and local videos directory on boot
 """
 
 import os
+import pwd
 import logging
 import shutil
 import time
 from pathlib import Path
 import re
 from datetime import datetime
+from console import show_on_console
 from constants import (
     VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN,
     DATE_FORMAT, TIME_FORMAT, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
@@ -22,22 +24,19 @@ class USBSync:
         self.local_videos_path = Path(local_videos_path or DEFAULT_VIDEOS_PATH)
     
     def display_message_on_screen(self, message):
-        """
-        Display a message on the HDMI screen (TTY1)
-        Args:
-            message: Message string to display
-        """
+        """Display a message on the HDMI screen (TTY1)"""
+        show_on_console(f"\n\n{message}\n\n")
+
+    def _set_looper_owner(self, path):
+        """Give a copied file to the looper user, in case this runs as root"""
         try:
-            tty1_path = '/dev/tty1'
-            if os.path.exists(tty1_path):
-                with open(tty1_path, 'w') as tty1:
-                    # Clear screen and display message
-                    tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
-                    tty1.write(f"\n\n{message}\n\n")
-                    tty1.flush()
-        except (PermissionError, OSError):
-            pass
-        except Exception:
+            looper_user = pwd.getpwnam('looper')
+            uid, gid = looper_user.pw_uid, looper_user.pw_gid
+        except KeyError:
+            uid, gid = 1000, 1000
+        try:
+            os.chown(path, uid, gid)
+        except OSError:
             pass
         
     def find_usb_drives(self):
@@ -340,15 +339,7 @@ class USBSync:
                 
                 if should_copy:
                     shutil.copy2(usb_file, local_file)
-                    try:
-                        import pwd
-                        looper_user = pwd.getpwnam('looper')
-                        os.chown(local_file, looper_user.pw_uid, looper_user.pw_gid)
-                    except (KeyError, ImportError, PermissionError):
-                        try:
-                            os.chown(local_file, 1000, 1000)
-                        except Exception:
-                            pass
+                    self._set_looper_owner(local_file)
                     
                     if filename in local_files:
                         updated_count += 1
@@ -367,16 +358,7 @@ class USBSync:
             if usb_config.exists():
                 try:
                     shutil.copy2(usb_config, local_config)
-                    try:
-                        import pwd
-                        looper_user = pwd.getpwnam('looper')
-                        os.chown(local_config, looper_user.pw_uid, looper_user.pw_gid)
-                    except (KeyError, ImportError, PermissionError):
-                        try:
-                            os.chown(local_config, 1000, 1000)
-                        except Exception:
-                            pass
-                    pass
+                    self._set_looper_owner(local_config)
                 except Exception:
                     pass
             elif local_config.exists():

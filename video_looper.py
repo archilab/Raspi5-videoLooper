@@ -14,6 +14,7 @@ import select
 import termios
 import tty
 import fcntl
+import calendar
 from datetime import datetime
 from pathlib import Path
 import signal
@@ -21,6 +22,7 @@ from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 from hdmi_controller import HDMIController
 from usb_sync import USBSync
+from console import show_on_console
 from constants import (
     DEFAULT_VIDEOS_PATH, VIDEO_EXTENSIONS,
     PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT,
@@ -278,18 +280,10 @@ class VideoLooper:
             text = "\n".join(lines)
             print(text, flush=True)
             
-            # Write directly to TTY1 (main console, usually shows on HDMI)
-            try:
-                tty1_path = '/dev/tty1'
-                if os.path.exists(tty1_path):
-                    with open(tty1_path, 'w') as tty1:
-                        # Clear screen using ANSI escape codes
-                        tty1.write('\033[2J\033[H')  # Clear screen and move cursor to home
-                        tty1.write(text)
-                        tty1.flush()
-            except (PermissionError, OSError) as e:
-                self.logger.error(f"Could not write to TTY1: {e}")
-            
+            # tty1 is the main console, which usually shows on HDMI
+            if not show_on_console(text):
+                self.logger.error("Could not write to TTY1")
+
             # Keep the information visible for 10 seconds before showing menu
             time.sleep(10)
             
@@ -403,49 +397,29 @@ class VideoLooper:
     
     def _show_menu_screen(self, remaining=None):
         """Display menu screen without flickering"""
-        try:
-            tty1_path = '/dev/tty1'
-            if os.path.exists(tty1_path):
-                with open(tty1_path, 'w') as tty1:
-                    # Clear screen and reset cursor
-                    tty1.write('\033[2J\033[H\033[0m')  # Clear, home, reset formatting
-                    tty1.write("\n")
-                    tty1.write("=" * 60 + "\n")
-                    tty1.write("Video Looper - Boot Menu\n")
-                    tty1.write("=" * 60 + "\n")
-                    tty1.write("\n")
-                    tty1.write("Select an option:\n")
-                    tty1.write("\n")
-                    tty1.write("  1. Start Demo Mode\n")
-                    tty1.write("  2. Set RTC Time\n")
-                    tty1.write("\n")
-                    tty1.write("  Press 1, 2, or Enter to continue...\n")
-                    tty1.write("\n")
-                    
-                    if remaining is not None and remaining > 0:
-                        tty1.write(f"  Auto-continuing in {remaining} second(s)...\n")
-                    elif remaining is not None:
-                        tty1.write("  Auto-continuing...\n")
-                    
-                    tty1.write("\n")
-                    tty1.flush()
-        except (PermissionError, OSError):
-            pass
+        lines = [
+            "",
+            "=" * 60,
+            "Video Looper - Boot Menu",
+            "=" * 60,
+            "",
+            "Select an option:",
+            "",
+            "  1. Start Demo Mode",
+            "  2. Set RTC Time",
+            "",
+            "  Press 1, 2, or Enter to continue...",
+            "",
+        ]
+        if remaining is not None and remaining > 0:
+            lines.append(f"  Auto-continuing in {remaining} second(s)...")
+        elif remaining is not None:
+            lines.append("  Auto-continuing...")
+        show_on_console("\n".join(lines) + "\n\n")
     
     def _show_feedback(self, message):
         """Show feedback message"""
-        try:
-            tty1_path = '/dev/tty1'
-            if os.path.exists(tty1_path):
-                with open(tty1_path, 'w') as tty1:
-                    # Clear screen and reset formatting
-                    tty1.write('\033[2J\033[H\033[0m')
-                    tty1.write("Video Looper - Boot Menu\n")
-                    tty1.write("=" * 60 + "\n\n")
-                    tty1.write(f"{message}\n")
-                    tty1.flush()
-        except (PermissionError, OSError):
-            pass
+        show_on_console("Video Looper - Boot Menu\n" + "=" * 60 + f"\n\n{message}\n")
     
     def _get_numeric_input(self, prompt_text, min_value, max_value, timeout=60):
         """Get numeric input with validation - stable version"""
@@ -519,20 +493,12 @@ class VideoLooper:
     
     def _show_numeric_prompt(self, prompt_text, input_buffer, status=""):
         """Show numeric input prompt"""
-        try:
-            tty1_path = '/dev/tty1'
-            if os.path.exists(tty1_path):
-                with open(tty1_path, 'w') as tty1:
-                    # Clear screen and reset formatting
-                    tty1.write('\033[2J\033[H\033[0m')
-                    tty1.write(prompt_text)
-                    if input_buffer:
-                        tty1.write(f"\n\nInput: {input_buffer}")
-                    if status:
-                        tty1.write(f"\n{status}")
-                    tty1.flush()
-        except (PermissionError, OSError):
-            pass
+        text = prompt_text
+        if input_buffer:
+            text += f"\n\nInput: {input_buffer}"
+        if status:
+            text += f"\n{status}"
+        show_on_console(text)
     
     def _acquire_time_entry_hold(self):
         """
@@ -629,76 +595,29 @@ class VideoLooper:
     def _enter_and_set_time(self):
         """Handle manual RTC time setting - step-by-step entry"""
         try:
-            # Get Year
-            year = self._get_numeric_input(
-                "Set RTC Time\n" + "=" * 60 + "\n\nEnter Year (e.g., 2024):\n",
-                2000, 2099, timeout=60
-            )
-            if year is None:
-                self.show_message("Input timeout. Cancelled.", 3)
-                return
-            
-            # Get Month
-            month = self._get_numeric_input(
-                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\n\nEnter Month (1-12):\n",
-                1, 12, timeout=60
-            )
-            if month is None:
-                self.show_message("Input timeout. Cancelled.", 3)
-                return
-            
-            # Get Day (validate based on month)
-            max_day = 31
-            if month in [4, 6, 9, 11]:
-                max_day = 30
-            elif month == 2:
-                # Simple check - assume 29 for leap years
-                max_day = 29
-            
-            day = self._get_numeric_input(
-                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\n\nEnter Day (1-{max_day}):\n",
-                1, max_day, timeout=60
-            )
-            if day is None:
-                self.show_message("Input timeout. Cancelled.", 3)
-                return
-            
-            # Get Hour
-            hour = self._get_numeric_input(
-                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\nDay: {day}\n\nEnter Hour (0-23):\n",
-                0, 23, timeout=60
-            )
-            if hour is None:
-                self.show_message("Input timeout. Cancelled.", 3)
-                return
-            
-            # Get Minute
-            minute = self._get_numeric_input(
-                f"Set RTC Time\n" + "=" * 60 + f"\n\nYear: {year}\nMonth: {month}\nDay: {day}\nHour: {hour}\n\nEnter Minute (0-59):\n",
-                0, 59, timeout=60
-            )
-            if minute is None:
-                self.show_message("Input timeout. Cancelled.", 3)
-                return
-            
-            # Format time string
+            header = "Set RTC Time\n" + "=" * 60 + "\n\n"
+            entered = ""
+            values = []
+            for label, low, high in (('Year', 2000, 2099), ('Month', 1, 12), ('Day', 1, 31),
+                                     ('Hour', 0, 23), ('Minute', 0, 59)):
+                if label == 'Day':
+                    high = calendar.monthrange(values[0], values[1])[1]
+                hint = "e.g., 2026" if label == 'Year' else f"{low}-{high}"
+
+                value = self._get_numeric_input(
+                    f"{header}{entered}{chr(10) if entered else ''}Enter {label} ({hint}):\n",
+                    low, high, timeout=60
+                )
+                if value is None:
+                    self.show_message("Input timeout. Cancelled.", 3)
+                    return
+                values.append(value)
+                entered += f"{label}: {value}\n"
+
+            year, month, day, hour, minute = values
             time_str = f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:00"
-            
-            # Show confirmation
-            try:
-                tty1_path = '/dev/tty1'
-                if os.path.exists(tty1_path):
-                    with open(tty1_path, 'w') as tty1:
-                        # Clear screen and reset formatting
-                        tty1.write('\033[2J\033[H\033[0m')
-                        tty1.write("Set RTC Time\n")
-                        tty1.write("=" * 60 + "\n\n")
-                        tty1.write(f"Setting time to: {time_str}\n")
-                        tty1.write("\nWriting to RTC...\n")
-                        tty1.flush()
-            except (PermissionError, OSError):
-                pass
-            
+            show_on_console(f"{header}Setting time to: {time_str}\n\nWriting to RTC...\n")
+
             # The service sets the system time and writes it to the RTC
             if self._request_time_set(time_str):
                 self.show_message(f"Time set successfully!\n{time_str}\nWritten to RTC.", 3)
@@ -706,37 +625,15 @@ class VideoLooper:
                 # Log the error for debugging
                 self.logger.error(f"Failed to set time: {time_str}")
                 self.show_message(f"Failed to set time: {time_str}\nCheck logs for details.", 5)
-                
+
         except Exception as e:
             self.logger.error(f"Error in manual time setting: {e}")
             self.show_message(f"Error: {str(e)}", 3)
     
     def show_message(self, message, duration=3):
         """Show a message on screen for specified duration"""
-        try:
-            lines = []
-            lines.append("")
-            lines.append("=" * 60)
-            lines.append(message)
-            lines.append("=" * 60)
-            lines.append("")
-            
-            text = "\n".join(lines)
-            
-            try:
-                tty1_path = '/dev/tty1'
-                if os.path.exists(tty1_path):
-                    with open(tty1_path, 'w') as tty1:
-                        tty1.write('\033[2J\033[H')
-                        tty1.write(text)
-                        tty1.flush()
-            except (PermissionError, OSError):
-                pass
-            
-            time.sleep(duration)
-            
-        except Exception as e:
-            self.logger.error(f"Error showing message: {e}")
+        show_on_console("\n" + "=" * 60 + f"\n{message}\n" + "=" * 60 + "\n")
+        time.sleep(duration)
     
     def run_demo_mode(self):
         """Run demo mode - play all folders for 1 minute each with 30 sec pause"""
@@ -749,24 +646,14 @@ class VideoLooper:
             
             self.show_message(f"Starting demo mode with {len(all_folders)} folder(s)...", 3)
             
-            # Wake HDMI
-            if self.hdmi.is_available():
-                self.hdmi.wake_hdmi()
-                time.sleep(HDMI_WAKE_DELAY)
+            self._wake_display()
             
             for folder_path, video_files in all_folders:
                 folder_name = folder_path.name
                 self.show_message(f"Demo: Playing {folder_name}...", 2)
                 
-                # Start projector if configured
-                if self.has_projector_config(folder_path):
-                    self.load_projector_config(folder_path)
-                    if self.projector.config.get('enable_projector', False):
-                        if self.projector.connect():
-                            self.projector.start_projector()
-                
                 # Play videos for 1 minute (no looping in demo mode)
-                if self.start_video_timed(video_files, folder_path, duration=60):
+                if self.start_video(video_files, folder_path, duration=60):
                     # Wait for video playback to complete (max 65 seconds to account for startup)
                     if self.current_process:
                         try:
@@ -787,23 +674,33 @@ class VideoLooper:
         finally:
             self.stop_video(standby_hdmi=True)
     
-    def start_video(self, video_files, folder_path):
-        """Start VLC with video files in loop mode and control projector"""
+    def _wake_display(self):
+        """Wake the HDMI display, and retry if it reports it is still off"""
+        if not self.hdmi.is_available():
+            return
+        self.hdmi.wake_hdmi()
+        time.sleep(HDMI_WAKE_DELAY)
+        if self.hdmi.get_hdmi_power() == 0:
+            time.sleep(1)
+            self.hdmi.wake_hdmi()
+            time.sleep(HDMI_WAKE_DELAY)
+
+    def start_video(self, video_files, folder_path, duration=None):
+        """
+        Start VLC and the projector for a folder's videos
+        Args:
+            video_files: List of video file paths
+            folder_path: Path to folder containing videos
+            duration: Seconds to play for (demo mode), or None to loop until stopped
+        Returns:
+            bool: True if started successfully, False otherwise
+        """
         if not video_files:
             self.logger.error("No video files provided")
             return False
-        
-        # Wake HDMI before starting video - ensure it's awake
-        if self.hdmi.is_available():
-            self.hdmi.wake_hdmi()
-            time.sleep(HDMI_WAKE_DELAY)
-            # Verify HDMI is awake, retry if needed
-            hdmi_state = self.hdmi.get_hdmi_power()
-            if hdmi_state == 0:
-                time.sleep(1)
-                self.hdmi.wake_hdmi()
-                time.sleep(HDMI_WAKE_DELAY)
-        
+
+        self._wake_display()
+
         if self.has_projector_config(folder_path):
             self.load_projector_config(folder_path)
             if self.projector.config.get('enable_projector', False):
@@ -812,7 +709,7 @@ class VideoLooper:
                 elif not self.projector.start_projector():
                     self.logger.error("Failed to start projector")
             self.handle_video_start_delay(folder_path)
-        
+
         # Time entry may have started during the delays above
         if self.is_time_entry_active():
             return False
@@ -822,76 +719,13 @@ class VideoLooper:
             'cvlc',
             '--intf', 'dummy',  # No GUI
             '--fullscreen',  # Fullscreen mode
-            '--loop',  # Loop the playlist
+            *(['--run-time', str(duration)] if duration else ['--loop']),
             '--no-osd',  # No on-screen display
             '--no-audio',  # no audio
             '--quiet',  # Reduce output
+            *[str(f) for f in video_files],
         ]
-        
-        # Add all video files to the command
-        vlc_cmd.extend([str(f) for f in video_files])
-        
-        try:
-            self.current_process = subprocess.Popen(
-                vlc_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            self.current_folder = folder_path
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to start VLC: {e}")
-            return False
-    
-    def start_video_timed(self, video_files, folder_path, duration=60):
-        """
-        Start VLC with video files for a specific duration (no looping)
-        Used for demo mode
-        Args:
-            video_files: List of video file paths
-            folder_path: Path to folder containing videos
-            duration: Duration in seconds to play
-        Returns:
-            bool: True if started successfully, False otherwise
-        """
-        if not video_files:
-            self.logger.error("No video files provided")
-            return False
-        
-        # Wake HDMI before starting video - ensure it's awake
-        if self.hdmi.is_available():
-            self.hdmi.wake_hdmi()
-            time.sleep(HDMI_WAKE_DELAY)
-            # Verify HDMI is awake, retry if needed
-            hdmi_state = self.hdmi.get_hdmi_power()
-            if hdmi_state == 0:
-                time.sleep(1)
-                self.hdmi.wake_hdmi()
-                time.sleep(HDMI_WAKE_DELAY)
-        
-        if self.has_projector_config(folder_path):
-            self.load_projector_config(folder_path)
-            if self.projector.config.get('enable_projector', False):
-                if not self.projector.connect():
-                    self.logger.error("Failed to connect to projector")
-                elif not self.projector.start_projector():
-                    self.logger.error("Failed to start projector")
-            self.handle_video_start_delay(folder_path)
-        
-        # Create VLC command for timed playback (no loop)
-        vlc_cmd = [
-            'cvlc',
-            '--intf', 'dummy',
-            '--fullscreen',
-            '--run-time', str(duration),  # Play for specified duration
-            '--no-osd',
-            '--no-audio',
-            '--quiet',
-        ]
-        
-        # Add all video files to the command
-        vlc_cmd.extend([str(f) for f in video_files])
-        
+
         try:
             self.current_process = subprocess.Popen(
                 vlc_cmd,
@@ -1030,34 +864,16 @@ class VideoLooper:
                 
                 if active_folder_info:
                     folder_path, video_files = active_folder_info
-                    # Check if folder changed or video not playing
-                    if current_folder != folder_path:
-                        # Folder changed - stop old video and start new one
+                    playing = self.current_process is not None and self.current_process.poll() is None
+                    if current_folder != folder_path or not playing:
+                        # Folder changed, or VLC isn't running: (re)start the video
                         self.stop_video(standby_hdmi=False)
-                        if self.start_video(video_files, folder_path):
-                            current_folder = folder_path
-                        else:
-                            current_folder = None
-                    elif self.current_process is None:
-                        # Video should be playing but process is not running - restart
-                        self.stop_video(standby_hdmi=False)
-                        if self.start_video(video_files, folder_path):
-                            current_folder = folder_path
-                        else:
-                            current_folder = None
-                    elif self.current_process.poll() is not None:
-                        # Process has ended unexpectedly - restart
-                        self.stop_video(standby_hdmi=False)
-                        if self.start_video(video_files, folder_path):
-                            current_folder = folder_path
-                        else:
-                            current_folder = None
-                    else:
+                        started = self.start_video(video_files, folder_path)
+                        current_folder = folder_path if started else None
+                    elif self.hdmi.is_available():
                         # Video is playing correctly - ensure HDMI is awake
-                        if self.hdmi.is_available():
-                            hdmi_state = self.hdmi.get_hdmi_power()
-                            if hdmi_state == 0:
-                                self.hdmi.wake_hdmi()
+                        if self.hdmi.get_hdmi_power() == 0:
+                            self.hdmi.wake_hdmi()
                 else:
                     # No active folder - stop video and put HDMI in standby
                     if self.current_folder is not None or (self.current_process is not None and self.current_process.poll() is None):

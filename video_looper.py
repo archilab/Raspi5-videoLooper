@@ -20,7 +20,7 @@ from pathlib import Path
 import signal
 from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
-from hdmi_controller import HDMIController
+from hdmi_controller import HDMIController, STATE_ON
 from usb_sync import USBSync
 from console import show_on_console
 from constants import (
@@ -675,15 +675,10 @@ class VideoLooper:
             self.stop_video(standby_hdmi=True)
     
     def _wake_display(self):
-        """Wake the HDMI display, and retry if it reports it is still off"""
-        if not self.hdmi.is_available():
-            return
-        self.hdmi.wake_hdmi()
-        time.sleep(HDMI_WAKE_DELAY)
-        if self.hdmi.get_hdmi_power() == 0:
-            time.sleep(1)
-            self.hdmi.wake_hdmi()
-            time.sleep(HDMI_WAKE_DELAY)
+        """Wake the HDMI display if it was last told to be off, and give it time to come on"""
+        if self.hdmi.is_available() and self.hdmi.last_state != STATE_ON:
+            if self.hdmi.wake_hdmi():
+                time.sleep(HDMI_WAKE_DELAY)
 
     def start_video(self, video_files, folder_path, duration=None):
         """
@@ -766,15 +761,8 @@ class VideoLooper:
             self.clear_display()
             if self.hdmi.is_available():
                 time.sleep(1)
-                # Ensure HDMI goes to standby - retry if needed
                 self.hdmi.standby_hdmi()
-                time.sleep(1)
-                # Verify HDMI is in standby, retry if still awake
-                hdmi_state = self.hdmi.get_hdmi_power()
-                if hdmi_state == 1:
-                    time.sleep(1)
-                    self.hdmi.standby_hdmi()
-        
+
         self.current_folder = None
     
     def clear_display(self):
@@ -871,9 +859,9 @@ class VideoLooper:
                         started = self.start_video(video_files, folder_path)
                         current_folder = folder_path if started else None
                     elif self.hdmi.is_available():
-                        # Video is playing correctly - ensure HDMI is awake
-                        if self.hdmi.get_hdmi_power() == 0:
-                            self.hdmi.wake_hdmi()
+                        # Video is playing correctly. This only sends a command if
+                        # the last attempt to wake the display failed.
+                        self.hdmi.wake_hdmi()
                 else:
                     # No active folder - stop video and put HDMI in standby
                     if self.current_folder is not None or (self.current_process is not None and self.current_process.poll() is None):
@@ -881,11 +869,10 @@ class VideoLooper:
                         self.stop_video(standby_hdmi=True)
                         current_folder = None
                     elif self.hdmi.is_available():
-                        # Ensure HDMI is in standby when no video is playing
-                        hdmi_state = self.hdmi.get_hdmi_power()
-                        if hdmi_state == 1:
-                            self.hdmi.standby_hdmi()
-                
+                        # Nothing to play. This only sends a command if the display
+                        # was last told to be on, or the last attempt failed.
+                        self.hdmi.standby_hdmi()
+
                 # Wait for the next check, but react to time entry within a second
                 for _ in range(CHECK_INTERVAL):
                     if self.is_time_entry_active():

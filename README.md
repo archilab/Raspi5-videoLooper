@@ -3,7 +3,7 @@
 Unattended video playback for a Raspberry Pi 5 driving a screen or projector, for signage or installations. It works offline: you put videos in folders, and **each folder's name sets when it plays**.
 
 - Loops videos silently and fullscreen with VLC, starting on boot
-- Schedules by date and daily hours, including overnight
+- Schedules by date and daily hours, with several time windows a day and overnight windows
 - Updates content from a USB drive when the service starts
 - Keeps time with the Pi's battery-backed real-time clock (RTC), with no network needed
 - Switches a projector on and off over USB serial, with no setup for known brands
@@ -17,7 +17,7 @@ Name a folder like this:
 YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 ```
 
-To play in several time windows a day, join them with `_and_`.
+To play in several time windows a day, join them with `_and_`. One folder with several windows also avoids keeping the same videos in several folders.
 
 | Folder name | Plays |
 |---|---|
@@ -28,7 +28,7 @@ To play in several time windows a day, join them with `_and_`.
 | `2026-12-01_to_2026-12-31_0700_to_0900_and_1200_to_1400_and_1800_to_2200` | Three windows every day in December |
 
 - **Overnight windows:** if the end time is before the start time, the window starts on each date in the range and ends the next morning. The last night therefore runs into the morning after the end date.
-- **Between windows:** the video and projector stop and the HDMI signal goes off, unless another folder is active. A window can be overnight, and windows that touch or overlap play without a restart.
+- **Between windows:** the video and projector stop and the HDMI signal goes off, unless another folder is active. With a projector, keep gaps longer than its cool-down, or it may ignore the next start. A window can be overnight, and windows that touch or overlap play without a restart.
 - **Overlaps:** if several folders are active, the one with the latest start date plays. Give overlapping folders different start dates, since the winner is otherwise arbitrary.
 - **Videos:** every video in the folder loops in filename order. Supported: `.mp4 .avi .mov .mkv .wmv .flv .webm .m4v`.
 - **Ignored:** folders with no videos or a name that doesn't match, and files starting with `.`. The whole name must match, so one bad window or extra text makes a folder invalid. It won't play, and USB sync neither copies nor removes it. If it starts like a schedule, a warning is logged.
@@ -85,7 +85,7 @@ sudo -u looper python3 /home/looper/video_looper/video_looper.py --usb-sync-test
 
 ## Boot menu
 
-After each boot, the HDMI console shows the folder list for 10 seconds, then this menu for 20 seconds. Connect a USB keyboard to use it.
+After each boot, the HDMI console shows the folder list for 10 seconds, then this menu for 20 seconds. Connect a USB keyboard to use it. The menu only appears at boot, so reboot to reach it again.
 
 | Key | Action |
 |---|---|
@@ -94,6 +94,8 @@ After each boot, the HDMI console shows the folder list for 10 seconds, then thi
 | `Enter` | Continue, which also happens when the countdown ends |
 
 The service's video can start while the menu is on screen and cover it. Pressing `1` or `2` still works: the video stops within a couple of seconds, and returns by itself when you're done.
+
+The HDMI signal stays on for this menu even when nothing is scheduled. A projector doesn't switch on for it, though, so if a projector is your only screen, switch it on with its own remote first.
 
 ## Time
 
@@ -115,10 +117,10 @@ The service switches the HDMI signal on before playing and off when nothing is s
 
 - **After starting:** the signal stays on for the first 60 seconds after the service starts, so the boot menu is visible even when nothing is scheduled. To reach the menu after the signal is off, reboot.
 - **When the service stops:** the signal is switched back on, so the console can be used.
-- **While the signal is off:** keyboard input doesn't bring it back, and neither does turning the display on by hand. Restart the service to get it back:
+- **While the signal is off:** keyboard input doesn't bring it back, and neither does turning the display on by hand. Restarting the service brings it back for 60 seconds, and stopping the service brings it back until the service starts again:
 
 ```bash
-sudo systemctl restart video-looper
+sudo systemctl stop video-looper
 ```
 
 To check the signal state from another machine, read this file, which shows `On` or `Off`:
@@ -138,14 +140,14 @@ Connect a projector through a USB-to-serial adapter. **With no settings file in 
 
 - **Timing:** it waits 2 seconds, sends the start commands with 1 second between them, then waits 5 seconds before the video starts. Stopping waits 1 second first.
 - **Serial port:** the first `/dev/ttyUSB*` or `/dev/ttyACM*` at 9600 baud. With no adapter, the video just plays, and an adapter plugged in later is found the next time a video starts.
-- **When it switches:** it starts when a video starts, and stops when nothing is scheduled or the service stops. It stays on through a VLC restart, a change to a folder with the same settings, time entry and demo mode, because many projectors ignore a start command while cooling down. Restarting the service does switch it off and on again.
+- **When it switches:** it starts when a video starts, and stops when nothing is scheduled or the service stops. It stays on through a VLC restart, a change to a folder with the same settings, time entry and demo mode, because many projectors ignore a start command while cooling down. Restarting the service, including through `deploy.sh`, does switch it off and on again, and a gap between time windows switches it off.
 - **Other serial devices:** every adapter is treated as a projector connection, so a different device on the first port receives these commands too. To turn this off for a folder, add a settings file with `enable_projector=false`.
 
 To add a brand, add its commands to `BRAND_START_COMMANDS` and `BRAND_STOP_COMMANDS` in `constants.py`.
 
 ### Settings for a folder
 
-A settings file in a video folder replaces the automatic commands. It can be named `projector.txt`, `projector.conf` or `config.txt`, as `key=value` lines or JSON. See `projector_config_examples.txt` for full examples.
+A settings file in a video folder replaces the automatic commands and their delays, and it needs `enable_projector=true` to control anything. It can be named `projector.txt`, `projector.conf` or `config.txt`, as `key=value` lines or JSON. See `projector_config_examples.txt` for full examples.
 
 ```
 enable_projector=true
@@ -220,30 +222,32 @@ sudo journalctl -u video-looper -f
 | Local folder disappeared | It wasn't on the USB drive when the service started |
 | Display stays on after hours | Check whether the signal is really `Off`, under Display control above. If it is, check the display's no-signal or power-saving settings |
 | Screen is dark when it should show something | The signal is off because nothing is scheduled. Run `--test` and see Display control above |
-| Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual |
+| Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual. A settings file replaces the automatic commands |
+| Projector stays off after a short gap or restart | It may have ignored the start while cooling down. Use longer gaps between time windows |
 | Service won't start | `sudo journalctl -u video-looper -n 50` |
 
 Only warnings and errors are logged, to the system journal and not to a file, to reduce SD card wear. Errors from the boot menu aren't logged, because the login script discards them. The journal may not survive a reboot, depending on the system's configuration.
 
 ## How it works
 
-Two systemd services run as `looper`, with permission to set the clock but without root. `rtc-time-restore` sets the clock early in boot, then `video-looper` syncs from USB and runs the main loop.
+Two systemd services run as `looper`, with permission to set the clock. `rtc-time-restore` sets the clock early in boot. `video-looper` then waits for the display driver, gives `looper` write access to the kernel's HDMI blank file, which is its only step running as root, then syncs from USB and runs the main loop.
 
-The boot menu is a separate process started by the console login. When it needs the screen, it takes a file lock. The service then stops its video until the lock is released, which the kernel does even if the menu crashes. The menu has no permission to set the clock, so it passes the entered time to the service.
+The boot menu is a separate process started by the console login. When it needs the screen, it takes a file lock. The service then stops its video and keeps the HDMI signal and projector on until the lock is released, which the kernel does even if the menu crashes. The menu has no permission to set the clock, so it passes the entered time to the service.
 
 | File | Responsibility |
 |---|---|
 | `video_looper.py` | Main loop and command line |
-| `scheduler.py` | Parses folder names and decides what should play |
+| `scheduler.py` | Parses folder names, including time windows, and decides what should play |
 | `player.py` | VLC, and the display and projector around playback |
 | `boot_menu.py` | Menu screens, key input, time prompts, demo mode |
 | `time_entry.py` | The hold and time handoff between menu and service |
 | `time_sync.py` | Reads and writes the RTC and system clock |
 | `usb_sync.py` | USB detection, sync planning and safe copying |
 | `hdmi_controller.py` | Switches the HDMI signal on and off |
-| `projector_controller.py` | Serial projector commands |
+| `projector_controller.py` | Finds the USB serial adapter, and sends projector commands |
 | `console.py` | Writes to the HDMI console |
-| `constants.py` | Shared settings, like paths and the 30-second check interval |
+| `constants.py` | Shared settings, like paths, the check interval and the known projector brands |
+| `video-looper.service`, `rtc-time-restore.service` | The two systemd services |
 | `99-looper-rtc.rules` | Gives `looper` access to the RTC device |
 | `install.sh`, `deploy.sh` | Set up a Pi, and update its code |
 
@@ -255,7 +259,7 @@ Tests use only Python's standard library plus `pyserial`, and run on any Mac or 
 python3 -m unittest
 ```
 
-`deploy.sh` updates the code on a Pi that `install.sh` has already set up, using SSH key login and passwordless `sudo`. It only restarts the service if something changed, and refuses to restart if the USB sync would delete local folders. It doesn't change the videos folder itself, and new modules need adding to the file lists in both `deploy.sh` and `install.sh`, which the tests check.
+`deploy.sh` updates the code on a Pi that `install.sh` has already set up, using SSH key login and passwordless `sudo`. It only restarts the service if something changed, which interrupts the video and switches a connected projector off and on, and it refuses to restart if the USB sync would delete local folders. It doesn't change the videos folder itself, and new modules need adding to the file lists in both `deploy.sh` and `install.sh`, which the tests check.
 
 ```bash
 LOOPER_HOST=admin@192.168.1.140 ./deploy.sh --check
@@ -266,10 +270,11 @@ Other options are `--restart` to force a restart, and `--allow-usb-delete` to ov
 
 ## Security notes
 
-- The services run as `looper`, not root, and need no network. They hold the capability to set the clock.
+- The services run as `looper` and need no network. They hold the capability to set the clock. `video-looper` has one short step that runs as root at startup, to give `looper` write access to the HDMI blank file.
 - `install.sh` gives `hwclock` that capability too, and the RTC rule gives `looper` the device, so the `looper` user can change the clock outside the services.
 - The HDMI console logs in as `looper` automatically, so anyone with a keyboard on the Pi gets that user's shell.
 - `admin`, when `install.sh` creates it, has passwordless `sudo`, so protect its SSH access.
+- Every USB serial adapter receives the projector commands unless a folder's settings say otherwise, so don't connect other serial devices without checking.
 
 ## License
 

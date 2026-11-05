@@ -163,11 +163,21 @@ check_projector() {
     fi
     
     echo ""
+    echo "USB serial adapters:"
+    adapters=$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)
+    if [ -n "$adapters" ]; then
+        echo "$adapters" | sed 's/^/  /'
+    else
+        echo "  None. Videos play without projector control."
+    fi
+    echo "Folders without a settings file use the automatic brand commands, if there's an adapter."
+
+    echo ""
     echo "Testing projector connection:"
     if python3 video_looper.py --projector-test; then
         echo -e "${GREEN}✓ Projector test passed${NC}"
     else
-        echo -e "${RED}✗ Projector test failed${NC}"
+        echo -e "${YELLOW}⚠ Projector test failed, which is expected if no adapter is connected${NC}"
     fi
     
     echo ""

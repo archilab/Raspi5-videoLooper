@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 import player
+import projector_controller
 from tests.helpers import FakeDisplay, FakeProcess, FakeProjector, make_hdmi
 
 LOOP_COMMAND = ['cvlc', '--intf', 'dummy', '--fullscreen', '--loop', '--no-osd', '--no-audio', '--quiet',
@@ -75,6 +76,7 @@ class Starting(PlayerTestCase):
     def test_projector_started_once_when_enabled(self):
         self.enable_projector()
         self.player.start_video(['a.mp4'], self.folder)
+        self.assertTrue(self.player.projector_on)
         self.assertEqual(self.projector.calls, ['connect', 'start'])
 
     def test_projector_failure_does_not_stop_the_video(self):
@@ -88,6 +90,134 @@ class Starting(PlayerTestCase):
         import time
         self.player.start_video(['a.mp4'], self.folder)
         self.assertIn(mock.call(5), time.sleep.call_args_list)
+
+
+class ProjectorPower(PlayerTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enable_projector()
+
+    def other_folder(self, settings='enable_projector=true'):
+        folder = self.folder / 'other'
+        folder.mkdir()
+        (folder / 'projector.txt').write_text(settings)
+        return folder
+
+    def test_restart_keeps_it_on_without_a_second_start(self):
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.stop_video()
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertEqual(self.projector.calls, ['connect', 'start'])
+
+    def test_restart_skips_the_video_start_delay(self):
+        self.projector.load_config_from_file = lambda path: setattr(
+            self.projector, 'config', {'enable_projector': True, 'video_start_delay': 5})
+        self.player.start_video(['a.mp4'], self.folder)
+        import time
+        time.sleep.reset_mock()
+        self.player.stop_video()
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertNotIn(mock.call(5), time.sleep.call_args_list)
+
+    def test_switch_to_a_folder_with_the_same_settings_keeps_it_on(self):
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.stop_video()
+        self.player.start_video(['b.mp4'], self.other_folder())
+        self.assertEqual(self.projector.calls, ['connect', 'start'])
+
+    def test_switch_to_other_settings_stops_with_the_old_ones(self):
+        seen = []
+        real_stop = self.projector.stop_projector
+        def stop():
+            seen.append(self.projector.config)
+            return real_stop()
+        self.projector.stop_projector = stop
+        configs = iter([{'enable_projector': True, 'stop_command': 'OLD'},
+                        {'enable_projector': True, 'stop_command': 'NEW'}])
+        self.projector.load_config_from_file = lambda path: setattr(self.projector, 'config', next(configs))
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.start_video(['b.mp4'], self.other_folder())
+        self.assertEqual(seen[0]['stop_command'], 'OLD')
+        self.assertEqual(self.projector.calls, ['connect', 'start', 'stop', 'disconnect', 'connect', 'start'])
+        self.assertEqual(self.projector.config['stop_command'], 'NEW')
+
+    def test_switch_to_a_disabled_folder_stops_it(self):
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.start_video(['b.mp4'], self.other_folder('disabled'))
+        self.assertFalse(self.player.projector_on)
+        self.assertEqual(self.projector.calls, ['connect', 'start', 'stop', 'disconnect'])
+
+    def test_stop_projector(self):
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.stop_projector()
+        self.assertFalse(self.player.projector_on)
+        self.assertEqual(self.projector.calls, ['connect', 'start', 'stop', 'disconnect'])
+        self.player.stop_projector()
+        self.assertEqual(self.projector.calls.count('stop'), 1)
+
+    def test_nothing_is_stopped_without_a_start(self):
+        with self.assertNoLogs('player', 'ERROR'):
+            self.player.stop_projector()
+        self.assertEqual(self.projector.calls, [])
+
+    def test_failed_start_is_retried_at_the_next_video(self):
+        with mock.patch.object(self.projector, 'connect', return_value=False), self.assertLogs('player', 'ERROR'):
+            self.player.start_video(['a.mp4'], self.folder)
+        self.assertFalse(self.player.projector_on)
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertTrue(self.player.projector_on)
+
+    def test_release_leaves_it_on_without_sending_a_stop(self):
+        self.player.start_video(['a.mp4'], self.folder)
+        self.player.release_projector()
+        self.assertFalse(self.player.projector_on)
+        self.assertEqual(self.projector.calls, ['connect', 'start', 'disconnect'])
+
+
+class NoSettingsFile(PlayerTestCase):
+    """A folder with no settings file, using the real default settings"""
+
+    def real_projector(self, port):
+        real = projector_controller.ProjectorController()
+        real.find_usb_serial_port = lambda: port
+        real.connect = mock.Mock(return_value=True)
+        real.send_command = mock.Mock(return_value=True)
+        real.disconnect = mock.Mock()
+        self.player.projector = real
+        return real
+
+    def test_adapter_connected_sends_every_brand(self):
+        real = self.real_projector('/dev/ttyUSB0')
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertEqual([c.args[0] for c in real.send_command.call_args_list], ['~0000 1', 'PWR ON'])
+        self.assertTrue(self.player.projector_on)
+        real.send_command.reset_mock()
+        self.player.stop_projector()
+        self.assertEqual([c.args[0] for c in real.send_command.call_args_list], ['~0000 0', 'PWR OFF'])
+
+    def test_no_adapter_just_plays(self):
+        real = self.real_projector(None)
+        with self.assertNoLogs('player', 'ERROR'):
+            self.assertTrue(self.player.start_video(['a.mp4'], self.folder))
+            self.player.stop_projector()
+        real.connect.assert_not_called()
+        real.send_command.assert_not_called()
+        import time
+        self.assertNotIn(mock.call(5), time.sleep.call_args_list)
+        self.assertEqual(len(self.commands), 1)
+
+    def test_settings_file_replaces_the_brands(self):
+        real = self.real_projector('/dev/ttyUSB0')
+        (self.folder / 'projector.txt').write_text('enable_projector=true\nstart_command=ONLY THIS\n')
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertEqual([c.args[0] for c in real.send_command.call_args_list], ['ONLY THIS'])
+
+    def test_settings_file_can_turn_it_off(self):
+        real = self.real_projector('/dev/ttyUSB0')
+        (self.folder / 'projector.txt').write_text('enable_projector=false\n')
+        self.assertTrue(self.player.start_video(['a.mp4'], self.folder))
+        real.send_command.assert_not_called()
+        self.assertFalse(self.player.projector_on)
 
 
 class WaitingForVlc(PlayerTestCase):
@@ -113,7 +243,7 @@ class WaitingForVlc(PlayerTestCase):
 
 
 class Stopping(PlayerTestCase):
-    def test_stops_vlc_and_projector(self):
+    def test_stops_vlc_and_leaves_the_projector_on(self):
         self.enable_projector()
         self.player.start_video(['a.mp4'], self.folder)
         process = self.player.current_process
@@ -121,7 +251,8 @@ class Stopping(PlayerTestCase):
         self.assertFalse(process.alive)
         self.assertIsNone(self.player.current_process)
         self.assertIsNone(self.player.current_folder)
-        self.assertEqual(self.projector.calls, ['connect', 'start', 'stop', 'disconnect'])
+        self.assertTrue(self.player.projector_on)
+        self.assertEqual(self.projector.calls, ['connect', 'start'])
         self.assertEqual(self.display.sent, ['on'])
 
     def test_standby(self):

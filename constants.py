@@ -39,6 +39,16 @@ DEFAULT_SERIAL_TIMEOUT = 5
 DEFAULT_START_COMMAND = '~0000 1'
 DEFAULT_STOP_COMMAND = '~0000 0'
 
+# Used when a folder has no settings file and a USB serial adapter is connected.
+# Every brand's command is sent, and a projector ignores the ones it doesn't know.
+BRAND_START_COMMANDS = ['~0000 1', 'PWR ON']
+BRAND_STOP_COMMANDS = ['~0000 0', 'PWR OFF']
+BRAND_START_DELAY = 2  # seconds
+BRAND_STOP_DELAY = 1  # seconds
+BRAND_VIDEO_START_DELAY = 5  # seconds
+PROJECTOR_COMMAND_GAP = 1  # seconds between commands
+USB_SERIAL_PORTS = ['/dev/ttyUSB*', '/dev/ttyACM*']  # Not /dev/ttyAMA*, the Pi's own UART
+
 # USB mount points (priority order)
 USB_MOUNT_POINTS = [
     '/media/usb0',

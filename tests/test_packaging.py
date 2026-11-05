@@ -104,6 +104,13 @@ class CommandLine(unittest.TestCase):
         self.assertIn('Using projector settings from: 2026-01-01', result.stdout)
         self.assertIn('Could not open serial port', result.stdout)
 
+    def test_projector_test_without_settings_or_an_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            videos = Path(tmp) / 'videos'
+            make_tree(videos, {'2026-01-01_to_2026-01-02_0900_to_1800': {'a.mp4': ''}})
+            result = self.run_cli('video_looper.py', '--projector-test', '--videos-path', str(videos))
+        self.assertIn('No projector settings found', result.stdout)
+
     def test_projector_start_refuses_when_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             videos = Path(tmp) / 'videos'

@@ -4,6 +4,7 @@ Serial Communication Module for Projector Control
 Handles USB-to-serial communication with projectors/beamers
 """
 
+import glob
 import serial
 import logging
 import time
@@ -12,7 +13,9 @@ import json
 import subprocess
 from constants import (
     DEFAULT_SERIAL_PORT, DEFAULT_BAUD_RATE, DEFAULT_SERIAL_TIMEOUT,
-    DEFAULT_START_COMMAND, DEFAULT_STOP_COMMAND
+    DEFAULT_START_COMMAND, DEFAULT_STOP_COMMAND,
+    BRAND_START_COMMANDS, BRAND_STOP_COMMANDS, BRAND_START_DELAY, BRAND_STOP_DELAY,
+    BRAND_VIDEO_START_DELAY, PROJECTOR_COMMAND_GAP, USB_SERIAL_PORTS
 )
 
 class ProjectorController:
@@ -65,20 +68,32 @@ class ProjectorController:
             self.logger.error(f"Error loading config: {e}")
             return False
     
+    def find_usb_serial_port(self):
+        """Find the first USB serial adapter, or None if none is connected"""
+        for pattern in USB_SERIAL_PORTS:
+            ports = sorted(glob.glob(pattern))
+            if ports:
+                return ports[0]
+        return None
+
     def get_default_config(self):
-        """Get default projector configuration (Optoma defaults)"""
+        """Settings for a folder with no settings file: every known brand, if there's an adapter"""
+        port = self.find_usb_serial_port()
+        if not port:
+            return {'enable_projector': False}
         return {
-            'serial_port': DEFAULT_SERIAL_PORT,
+            'enable_projector': True,
+            'serial_port': port,
             'baud_rate': DEFAULT_BAUD_RATE,
             'timeout': DEFAULT_SERIAL_TIMEOUT,
-            'start_command': DEFAULT_START_COMMAND,
-            'stop_command': DEFAULT_STOP_COMMAND,
-            'start_delay': 0,
-            'stop_delay': 0,
-            'enable_projector': False,
-            'configure_stty': True  # Apply stty configuration for Optoma projectors
+            'start_commands': BRAND_START_COMMANDS,
+            'stop_commands': BRAND_STOP_COMMANDS,
+            'start_delay': BRAND_START_DELAY,
+            'stop_delay': BRAND_STOP_DELAY,
+            'video_start_delay': BRAND_VIDEO_START_DELAY,
+            'configure_stty': True
         }
-    
+
     def configure_serial_port(self, port):
         """Configure serial port using stty (for Optoma projectors)"""
         if not self.config.get('configure_stty', True):
@@ -186,30 +201,39 @@ class ProjectorController:
             self.logger.error(f"Error sending command: {e}")
             return False
     
+    def _send_commands(self, commands):
+        """Send commands in order, returning True if at least one was sent"""
+        sent = False
+        for index, command in enumerate(commands):
+            if index:
+                time.sleep(PROJECTOR_COMMAND_GAP)
+            sent = self.send_command(command) or sent
+        return sent
+
     def start_projector(self):
         """Start the projector"""
         if not self.config.get('enable_projector', False):
             return True
-        
+
         start_delay = int(self.config.get('start_delay', 0))
         if start_delay > 0:
             time.sleep(start_delay)
-        
-        start_command = self.config.get('start_command', DEFAULT_START_COMMAND)
-        return self.send_command(start_command)
-    
+
+        return self._send_commands(self.config.get('start_commands') or
+                                   [self.config.get('start_command', DEFAULT_START_COMMAND)])
+
     def stop_projector(self):
         """Stop the projector"""
         if not self.config.get('enable_projector', False):
             return True
-        
+
         stop_delay = int(self.config.get('stop_delay', 0))
         if stop_delay > 0:
             time.sleep(stop_delay)
-        
-        stop_command = self.config.get('stop_command', DEFAULT_STOP_COMMAND)
-        return self.send_command(stop_command)
-    
+
+        return self._send_commands(self.config.get('stop_commands') or
+                                   [self.config.get('stop_command', DEFAULT_STOP_COMMAND)])
+
     def get_available_ports(self):
         """Get list of available serial ports"""
         import serial.tools.list_ports

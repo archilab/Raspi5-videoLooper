@@ -17,6 +17,7 @@ class Player:
         self.projector = projector
         self.current_process = None
         self.current_folder = None
+        self.projector_on = False  # This process sent the start command, and no stop since
 
     def is_playing(self):
         """Check whether VLC is running"""
@@ -45,13 +46,12 @@ class Player:
         return False
     
     def load_projector_config(self, folder_path):
-        """Load projector configuration from folder"""
+        """Load a folder's projector settings, or the defaults if it has no settings file"""
         for config_file in PROJECTOR_CONFIG_FILES:
             config_path = folder_path / config_file
             if config_path.exists():
                 return self.projector.load_config_from_file(str(config_path))
         
-        # Use default config if no config file found
         self.projector.config = self.projector.get_default_config()
         return True
     
@@ -68,12 +68,52 @@ class Player:
             pass
         return False
     
+    def _start_projector(self, folder_path):
+        """
+        Start the projector for a folder, and wait for it if the settings say so.
+        If it's already on with the same settings it's left alone, since many
+        projectors ignore a start command while cooling down from a stop.
+        """
+        previous_config = self.projector.config
+        self.load_projector_config(folder_path)
+        new_config = self.projector.config
+
+        if self.projector_on:
+            if new_config == previous_config:
+                return
+            self.projector.config = previous_config
+            self.stop_projector()
+            self.projector.config = new_config
+
+        if new_config.get('enable_projector', False):
+            if not self.projector.connect():
+                self.logger.error("Failed to connect to projector")
+            elif not self.projector.start_projector():
+                self.logger.error("Failed to start projector")
+            else:
+                self.projector_on = True
+        self.handle_video_start_delay(folder_path)
+
+    def stop_projector(self):
+        """Stop the projector, if this process started it"""
+        if not self.projector_on:
+            return
+        self.projector_on = False
+        if not self.projector.stop_projector():
+            self.logger.error("Failed to stop projector")
+        self.projector.disconnect()
+
+    def release_projector(self):
+        """Close the serial port but leave the projector on, for the service to take over"""
+        self.projector_on = False
+        self.projector.disconnect()
+
     def wake_display(self):
         """Wake the HDMI display if it was last told to be off, and give it time to come on"""
         if self.hdmi.is_available() and self.hdmi.last_state != STATE_ON:
             if self.hdmi.wake_hdmi():
                 time.sleep(HDMI_WAKE_DELAY)
-    
+
     def start_video(self, video_files, folder_path, duration=None, ignore_hold=False):
         """
         Start VLC and the projector for a folder's videos
@@ -91,14 +131,7 @@ class Player:
 
         self.wake_display()
 
-        if self.has_projector_config(folder_path):
-            self.load_projector_config(folder_path)
-            if self.projector.config.get('enable_projector', False):
-                if not self.projector.connect():
-                    self.logger.error("Failed to connect to projector")
-                elif not self.projector.start_projector():
-                    self.logger.error("Failed to start projector")
-            self.handle_video_start_delay(folder_path)
+        self._start_projector(folder_path)
 
         # The menu may have taken the screen during the delays above
         if not ignore_hold and time_entry.is_active():
@@ -130,7 +163,7 @@ class Player:
     
     def stop_video(self, standby_hdmi=False):
         """
-        Stop the current video playback and projector
+        Stop the current video playback. The projector stays on: use stop_projector
         Args:
             standby_hdmi: If True, put HDMI display in standby after stopping video
         """
@@ -145,12 +178,6 @@ class Player:
                 self.logger.error(f"Error stopping video: {e}")
             finally:
                 self.current_process = None
-        
-        if self.current_folder and self.has_projector_config(self.current_folder):
-            if self.projector.config.get('enable_projector', False):
-                if not self.projector.stop_projector():
-                    self.logger.error("Failed to stop projector")
-                self.projector.disconnect()
         
         if standby_hdmi:
             self.clear_display()

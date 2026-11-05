@@ -58,6 +58,75 @@ class HdmiController(unittest.TestCase):
             self.assertFalse(self.hdmi.is_available())
 
 
+class ProjectorDefaults(unittest.TestCase):
+    def setUp(self):
+        self.projector = projector_controller.ProjectorController()
+
+    def globbing(self, *found):
+        return mock.patch.object(projector_controller.glob, 'glob',
+                                 side_effect=lambda pattern: [p for p in found if p.startswith(pattern[:-1])])
+
+    def test_finds_the_first_adapter(self):
+        with self.globbing('/dev/ttyUSB1', '/dev/ttyUSB0', '/dev/ttyACM0'):
+            self.assertEqual(self.projector.find_usb_serial_port(), '/dev/ttyUSB0')
+
+    def test_finds_an_acm_adapter(self):
+        with self.globbing('/dev/ttyACM0'):
+            self.assertEqual(self.projector.find_usb_serial_port(), '/dev/ttyACM0')
+
+    def test_never_uses_the_pi_uart(self):
+        with self.globbing('/dev/ttyAMA10', '/dev/ttyAMA0'):
+            self.assertIsNone(self.projector.find_usb_serial_port())
+
+    def test_defaults_with_an_adapter(self):
+        with self.globbing('/dev/ttyUSB0'):
+            config = self.projector.get_default_config()
+        self.assertEqual(config, {
+            'enable_projector': True, 'serial_port': '/dev/ttyUSB0', 'baud_rate': 9600, 'timeout': 5,
+            'start_commands': ['~0000 1', 'PWR ON'], 'stop_commands': ['~0000 0', 'PWR OFF'],
+            'start_delay': 2, 'stop_delay': 1, 'video_start_delay': 5, 'configure_stty': True,
+        })
+
+    def test_defaults_without_an_adapter(self):
+        with self.globbing():
+            self.assertEqual(self.projector.get_default_config(), {'enable_projector': False})
+
+    def test_commands_are_written_in_order_with_a_gap(self):
+        port = mock.Mock()
+        self.projector.serial_connection = port
+        self.projector.is_connected = True
+        with self.globbing('/dev/ttyUSB0'):
+            self.projector.config = self.projector.get_default_config()
+        events = []
+        port.write.side_effect = lambda data: events.append(data)
+        with mock.patch('time.sleep', side_effect=lambda s: events.append(s)):
+            self.assertTrue(self.projector.start_projector())
+            self.assertEqual(events, [2, b'~0000 1\r', 1, b'PWR ON\r'])
+            events.clear()
+            self.assertTrue(self.projector.stop_projector())
+            self.assertEqual(events, [1, b'~0000 0\r', 1, b'PWR OFF\r'])
+
+    def test_one_failed_command_still_sends_the_next(self):
+        self.projector.config = {'enable_projector': True, 'start_commands': ['A', 'B']}
+        self.projector.send_command = mock.Mock(side_effect=[False, True])
+        with mock.patch('time.sleep'):
+            self.assertTrue(self.projector.start_projector())
+        self.assertEqual(self.projector.send_command.call_count, 2)
+
+    def test_all_commands_failing_is_a_failure(self):
+        self.projector.config = {'enable_projector': True, 'start_commands': ['A', 'B']}
+        self.projector.send_command = mock.Mock(return_value=False)
+        with mock.patch('time.sleep'):
+            self.assertFalse(self.projector.start_projector())
+
+    def test_settings_file_commands_still_work(self):
+        self.projector.config = {'enable_projector': True, 'start_command': 'PWR ON', 'stop_command': 'PWR OFF'}
+        self.projector.send_command = mock.Mock(return_value=True)
+        self.projector.start_projector()
+        self.projector.stop_projector()
+        self.assertEqual([c.args[0] for c in self.projector.send_command.call_args_list], ['PWR ON', 'PWR OFF'])
+
+
 class ProjectorErrors(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

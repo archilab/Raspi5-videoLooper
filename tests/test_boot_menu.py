@@ -301,6 +301,20 @@ class DemoMode(MenuTestCase):
         for call in self.player.stop_video.call_args_list:
             self.assertEqual(call, mock.call(standby_hdmi=False))
 
+    def test_projector_goes_off_after_the_demo_if_nothing_is_scheduled(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        with mock.patch('scheduler.find_active_folder', return_value=None):
+            self.menu.run_demo_mode()
+        self.player.stop_projector.assert_called_once()
+        self.player.release_projector.assert_not_called()
+
+    def test_projector_stays_on_after_the_demo_if_something_is_scheduled(self):
+        make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
+        with mock.patch('scheduler.find_active_folder', return_value=(self.tmp, [])):
+            self.menu.run_demo_mode()
+        self.player.release_projector.assert_called_once()
+        self.player.stop_projector.assert_not_called()
+
     def test_hold_released_if_the_demo_fails(self):
         make_tree(self.tmp / 'videos', {folder_name(1): {'a.mp4': ''}})
         hold = mock.Mock()

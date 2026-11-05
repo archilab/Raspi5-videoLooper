@@ -1,5 +1,7 @@
 # Example Projector Configuration Files
 # Place these files in your video folders to control projector behavior
+# Without one, known brands are controlled automatically through a USB serial adapter,
+# and enable_projector=false turns that off for a folder
 
 # ===========================================
 # projector.txt - Simple format example

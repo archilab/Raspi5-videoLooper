@@ -6,7 +6,7 @@ Unattended video playback for a Raspberry Pi 5 driving a screen or projector, fo
 - Schedules by date and daily hours, including overnight
 - Updates content from a USB drive when the service starts
 - Keeps time with the Pi's battery-backed real-time clock (RTC), with no network needed
-- Switches a projector on and off over USB serial, with settings per folder
+- Switches a projector on and off over USB serial, with no setup for known brands
 - Switches the HDMI signal off outside scheduled hours, so most displays go to sleep
 
 ## Scheduling
@@ -129,7 +129,23 @@ cat /sys/class/drm/card1-HDMI-A-1/dpms
 
 ## Projector control
 
-Control a projector through a USB-to-serial adapter by putting a settings file in a video folder. The file can be named `projector.txt`, `projector.conf` or `config.txt`, as `key=value` lines or JSON. See `projector_config_examples.txt` for full examples.
+Connect a projector through a USB-to-serial adapter. **With no settings file in a video folder, the known brands' commands are sent automatically:**
+
+| | Commands, in order |
+|---|---|
+| Start | `~0000 1`, then `PWR ON` |
+| Stop | `~0000 0`, then `PWR OFF` |
+
+- **Timing:** it waits 2 seconds, sends the start commands with 1 second between them, then waits 5 seconds before the video starts. Stopping waits 1 second first.
+- **Serial port:** the first `/dev/ttyUSB*` or `/dev/ttyACM*` at 9600 baud. With no adapter, the video just plays, and an adapter plugged in later is found the next time a video starts.
+- **When it switches:** it starts when a video starts, and stops when nothing is scheduled or the service stops. It stays on through a VLC restart, a change to a folder with the same settings, time entry and demo mode, because many projectors ignore a start command while cooling down. Restarting the service does switch it off and on again.
+- **Other serial devices:** every adapter is treated as a projector connection, so a different device on the first port receives these commands too. To turn this off for a folder, add a settings file with `enable_projector=false`.
+
+To add a brand, add its commands to `BRAND_START_COMMANDS` and `BRAND_STOP_COMMANDS` in `constants.py`.
+
+### Settings for a folder
+
+A settings file in a video folder replaces the automatic commands. It can be named `projector.txt`, `projector.conf` or `config.txt`, as `key=value` lines or JSON. See `projector_config_examples.txt` for full examples.
 
 ```
 enable_projector=true
@@ -144,7 +160,7 @@ video_start_delay=5
 
 | Setting | Meaning | Default |
 |---|---|---|
-| `enable_projector` | Control the projector for this folder | `false` |
+| `enable_projector` | Control the projector for this folder. Needed in a settings file | `false` |
 | `serial_port` | Adapter port; find it with `--list-ports` | `/dev/ttyUSB0` |
 | `baud_rate` | Serial speed from the projector's manual | `9600` |
 | `timeout` | Serial timeout in seconds | `5` |
@@ -156,13 +172,15 @@ video_start_delay=5
 
 **Commands differ by model, so check your projector's manual.** The system only sends commands. It doesn't check that the projector responded, and a failure doesn't stop the video.
 
-To test, using the settings of the folder playing now, or otherwise the first folder with settings:
+### Testing
+
+These use the settings of the folder playing now, otherwise the first folder with settings, otherwise the automatic commands if there's an adapter.
 
 ```bash
 sudo -u looper python3 /home/looper/video_looper/video_looper.py --projector-test
 ```
 
-`--projector-test` only opens the serial port and sends nothing. That shows the adapter and settings work, but not that a projector is listening. `--projector-start` and `--projector-stop` send the real commands, and need `enable_projector=true`.
+`--projector-test` only opens the serial port and sends nothing. That shows the adapter and settings work, but not that a projector is listening. `--projector-start` and `--projector-stop` send the real commands, and need projector control to be enabled.
 
 ## Commands
 
@@ -176,8 +194,8 @@ Run these as `looper`, for example `sudo -u looper python3 /home/looper/video_lo
 | `--sync-time` | Load the system time from the RTC |
 | `--list-ports` | List serial ports |
 | `--projector-test` | Check that the projector's serial port opens |
-| `--projector-start` | Send the power on command |
-| `--projector-stop` | Send the power off command |
+| `--projector-start` | Send the power on command, or commands |
+| `--projector-stop` | Send the power off command, or commands |
 | `--usb-sync-test` | Preview a USB sync |
 | `--usb-sync` | Sync now, and `--usb-path PATH` picks the drive. Stop the service first, since the sync can replace or remove what's playing |
 | `--display-folder-info` | Show the folder list and boot menu |

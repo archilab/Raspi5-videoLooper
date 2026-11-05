@@ -188,6 +188,57 @@ class DisplaySignal(MainLoopTestCase):
         self.assertEqual(self.display.sent, [])
 
 
+class ProjectorPower(MainLoopTestCase):
+    def setUp(self):
+        super().setUp()
+        self.folder = Path(self.tmp) / 'with-projector'
+        self.folder.mkdir()
+        (self.folder / 'projector.txt').write_text('enable_projector=true')
+        self.active = (self.folder, ['a.mp4'])
+        self.calls = self.looper.projector.calls
+
+    def test_stays_on_through_a_vlc_crash(self):
+        seen = []
+        self.run_passes(lambda: self.vlc[-1].terminate(), None, lambda: seen.append(list(self.calls)))
+        self.assertEqual(seen, [['connect', 'start']])
+        self.assertEqual(len(self.vlc), 2)
+
+    def test_stops_when_nothing_is_scheduled(self):
+        seen = []
+        self.run_passes(lambda: self.set_active(None), lambda: seen.append(list(self.calls)))
+        self.assertEqual(seen, [['connect', 'start', 'stop', 'disconnect']])
+
+    def test_stays_on_through_time_entry(self):
+        seen = []
+        def hold():
+            self.time_entry_active = True
+        def release():
+            self.time_entry_active = False
+        self.run_passes(hold, None, lambda: seen.append(list(self.calls)), release, None,
+                        lambda: seen.append(list(self.calls)))
+        self.assertEqual(seen, [['connect', 'start'], ['connect', 'start']])
+
+    def test_stops_if_the_schedule_ended_during_a_hold(self):
+        seen = []
+        def hold():
+            self.time_entry_active = True
+        def release():
+            self.time_entry_active = False
+            self.active = None
+        self.run_passes(hold, None, release, None, lambda: seen.append(list(self.calls)))
+        self.assertEqual(seen, [['connect', 'start', 'stop', 'disconnect']])
+
+    def test_stops_when_the_service_stops(self):
+        self.run_passes(None)
+        self.assertEqual(self.calls[:3], ['connect', 'start', 'stop'])
+
+    def test_grace_period_does_not_delay_stopping_the_projector(self):
+        seen = []
+        with mock.patch.object(video_looper, 'BOOT_MENU_GRACE', 60):
+            self.run_passes(lambda: self.set_active(None), lambda: seen.append(list(self.calls)))
+        self.assertIn('stop', seen[0])
+
+
 class TimeEntryHold(MainLoopTestCase):
     def setUp(self):
         super().setUp()

@@ -55,8 +55,9 @@ class VideoLooper:
         sys.exit(0)
 
     def shut_down(self):
-        """Stop playback and leave the HDMI signal on, so the console can be used"""
+        """Stop playback and the projector, and leave the HDMI signal on for the console"""
         self.player.stop_video(standby_hdmi=False)
+        self.player.stop_projector()
         self.projector.disconnect()
         if self.hdmi.is_available():
             self.hdmi.wake_hdmi()
@@ -116,6 +117,7 @@ class VideoLooper:
                         # Nothing to play. This only does anything if the signal was
                         # last on, or the last attempt to switch it off failed.
                         self.hdmi.standby_hdmi()
+                    self.player.stop_projector()
 
                 # Wait for the next check, but react to the menu within a second
                 for _ in range(CHECK_INTERVAL):
@@ -135,7 +137,8 @@ class VideoLooper:
 def load_projector_config(looper):
     """
     Load the projector settings for the command line: those of the folder playing now,
-    otherwise of the first folder that has any, otherwise the defaults.
+    otherwise of the first folder that has any, otherwise every known brand if there's
+    a USB serial adapter.
     Returns True if projector control is enabled in those settings.
     """
     active = scheduler.find_active_folder(looper.videos_path)
@@ -147,7 +150,11 @@ def load_projector_config(looper):
             break
     else:
         looper.projector.config = looper.projector.get_default_config()
-        print("No projector settings found in any video folder, using the defaults")
+        port = looper.projector.config.get('serial_port')
+        if port:
+            print(f"No projector settings found, using every known brand on {port}")
+        else:
+            print("No projector settings found, and no USB serial adapter")
     return looper.projector.config.get('enable_projector', False)
 
 
@@ -167,9 +174,9 @@ def main():
     parser.add_argument('--projector-test', action='store_true',
                        help='Check that the projector serial port opens (sends nothing)')
     parser.add_argument('--projector-start', action='store_true',
-                       help='Send the power on command to the projector')
+                       help='Send the power on command, or commands, to the projector')
     parser.add_argument('--projector-stop', action='store_true',
-                       help='Send the power off command to the projector')
+                       help='Send the power off command, or commands, to the projector')
     parser.add_argument('--list-ports', action='store_true',
                        help='List available serial ports')
     parser.add_argument('--usb-sync', action='store_true',
@@ -232,7 +239,7 @@ def main():
         # Send a real power command
         action = 'Starting' if args.projector_start else 'Stopping'
         if not load_projector_config(looper):
-            print("✗ Projector control is off in these settings: set enable_projector=true")
+            print("✗ Projector control is off: no USB serial adapter, or enable_projector=false in the settings")
             sys.exit(1)
         print(f"{action} projector...")
         if not looper.projector.connect():

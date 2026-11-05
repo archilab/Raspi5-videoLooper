@@ -362,8 +362,13 @@ class BootMenu:
         try:
             self._play_demo()
         finally:
-            # The service takes the display back when the hold ends
+            # The service takes the display back when the hold ends. It doesn't know this
+            # process started the projector, so switch it off here if nothing is scheduled
             self.player.stop_video(standby_hdmi=False)
+            if scheduler.find_active_folder(self.videos_path):
+                self.player.release_projector()
+            else:
+                self.player.stop_projector()
             if hold:
                 hold.close()
 

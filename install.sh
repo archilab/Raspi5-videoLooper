@@ -239,7 +239,7 @@ sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
 sudo cp -f constants.py "$INSTALL_DIR/"
 sudo cp -f console.py "$INSTALL_DIR/"
-sudo cp -f boot_menu.py player.py scheduler.py time_entry.py "$INSTALL_DIR/"
+sudo cp -f boot_menu.py network_setup.py player.py scheduler.py time_entry.py "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
@@ -282,6 +282,10 @@ echo -e "${GREEN}Giving looper access to the RTC device...${NC}"
 sudo install -o root -g root -m 644 99-looper-rtc.rules /etc/udev/rules.d/99-looper-rtc.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=rtc --action=change
+
+# Let the boot menu set Wi-Fi and switch NTP
+echo -e "${GREEN}Allowing the boot menu to set Wi-Fi and the time source...${NC}"
+sudo install -o root -g root -m 644 50-looper-network-time.rules /etc/polkit-1/rules.d/50-looper-network-time.rules
 
 # Configure system to use RTC only
 echo -e "${GREEN}Configuring system for RTC-only mode...${NC}"

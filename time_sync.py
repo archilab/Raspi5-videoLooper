@@ -2,7 +2,9 @@
 """
 RTC-only time sync for Raspberry Pi 5:
 - Loads system time from the RTC at startup.
-- NTP is disabled; the system relies entirely on the RTC, which is kept in UTC.
+- The RTC is kept in UTC, and NTP is off unless switched on from the boot menu.
+- With NTP on, the system clock follows it when there's internet, and the RTC follows
+  the system clock, so the time survives a power cut without internet.
 - Changing the clock needs CAP_SYS_TIME, which the systemd services grant.
 """
 
@@ -17,6 +19,7 @@ import time
 from datetime import datetime
 
 RTC_EPOCH_FILE = "/sys/class/rtc/rtc0/since_epoch"
+NTP_SYNCED_FILE = "/run/systemd/timesync/synchronized"  # Exists once NTP has set the clock
 
 
 class _Timeval(ctypes.Structure):
@@ -95,8 +98,41 @@ class TimeSyncManager:
         )
         return False
 
+    def _timedatectl(self, *args):
+        """Run timedatectl, returning the finished process, or None if it couldn't be run"""
+        try:
+            return subprocess.run(["timedatectl", *args], capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as e:
+            self.logger.error(f"timedatectl could not run: {e}")
+            return None
+
+    def ntp_enabled(self):
+        """Check whether the time source is NTP rather than the RTC alone"""
+        result = self._timedatectl("show", "-p", "NTP", "--value")
+        return result is not None and result.stdout.strip() == "yes"
+
+    def set_ntp(self, enabled):
+        """Switch NTP on or off, returning True if that worked"""
+        result = self._timedatectl("set-ntp", "true" if enabled else "false")
+        if result is None or result.returncode != 0:
+            self.logger.error(f"Could not switch NTP: {result.stderr.strip() if result else 'timedatectl failed'}")
+            return False
+        return True
+
+    def is_ntp_synced(self):
+        """Check whether NTP is on and has set the clock"""
+        # The file first: this runs early in boot, before timedatectl can answer
+        return os.path.exists(NTP_SYNCED_FILE) and self.ntp_enabled()
+
+    def update_rtc_from_ntp(self):
+        """Copy NTP's time to the RTC, if NTP has set the clock"""
+        if self.is_ntp_synced():
+            self.write_system_time_to_rtc()
+
     def sync_time(self):
-        """Load system time from the RTC (NTP is disabled)"""
+        """Load system time from the RTC, unless NTP has already set a better time"""
+        if self.is_ntp_synced():
+            return True
         return self.load_system_time_from_rtc()
 
     def set_time_manually(self, time_str):
@@ -118,7 +154,8 @@ class TimeSyncManager:
         return {
             "rtc_available": self.hwclock_cmd is not None,
             "last_sync": self.last_sync,
-            "mode": "RTC-only (NTP disabled)",
+            "mode": "NTP when internet is available" if self.ntp_enabled() else "RTC only",
+            "ntp_synced": self.is_ntp_synced(),
         }
 
 
@@ -129,7 +166,7 @@ def main():
     parser.add_argument(
         "--sync",
         action="store_true",
-        help="Load system time from RTC (RTC-only mode, NTP disabled)",
+        help="Load system time from RTC, unless NTP has already set it",
     )
     args = parser.parse_args()
 

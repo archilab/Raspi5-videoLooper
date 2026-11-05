@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""The boot menu shown on the HDMI console after login: folder list, demo mode and setting the time"""
+"""The boot menu shown on the HDMI console after login: folder list, demo mode, time and Wi-Fi settings"""
 
 import calendar
+import codecs
 import logging
 import os
 import select
@@ -11,16 +12,24 @@ import termios
 import time
 import tty
 from datetime import datetime
+import network_setup
 import scheduler
 import time_entry
 from console import show_on_console
 
 
+# Keep waiting this long since the last key press on the text and list screens
+ENTRY_TIMEOUT = 120  # seconds
+
+
 class BootMenu:
-    def __init__(self, videos_path, player):
+    def __init__(self, videos_path, player, time_sync):
         self.logger = logging.getLogger(__name__)
         self.videos_path = videos_path
         self.player = player
+        self.time_sync = time_sync
+        self.wifi_status = None
+        self.time_status = None
 
     def display_folder_info_on_screen(self):
         """Display folder information on HDMI screen"""
@@ -130,7 +139,14 @@ class BootMenu:
                     return None
             # Read the terminal directly: text-mode stdin would hold back an Enter ("\r")
             # until the next key arrives, in case it's the start of "\r\n"
-            return os.read(sys.stdin.fileno(), 1).decode(errors='ignore')
+            decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+            while True:
+                data = os.read(sys.stdin.fileno(), 1)
+                if not data:
+                    return ''
+                text = decoder.decode(data)  # Empty until a multi-byte character is complete
+                if text:
+                    return text
         except (OSError, ValueError):
             return None
     
@@ -138,6 +154,8 @@ class BootMenu:
         """Display boot menu UI and handle user selection - stable version"""
         try:
             menu_timeout = 20  # seconds to wait for input
+            self.wifi_status = network_setup.current_wifi() or "not connected"
+            self.time_status = "NTP" if self.time_sync.ntp_enabled() else "RTC only"
             start_time = time.time()
             last_countdown_update = 0
             
@@ -180,11 +198,21 @@ class BootMenu:
                             time.sleep(0.5)
                             self.handle_manual_time_setting()
                             return None
+                        elif char == '3':
+                            self._show_feedback("Option 3: Setting Wi-Fi...")
+                            time.sleep(0.5)
+                            self._with_hold(self._set_wifi)
+                            return None
+                        elif char == '4':
+                            self._show_feedback("Option 4: Time source...")
+                            time.sleep(0.5)
+                            self._with_hold(self._set_time_source)
+                            return None
                         elif char == '\n' or char == '\r':
                             return None  # Enter pressed, continue
                         else:
                             # Invalid key - show error and restart
-                            self._show_feedback(f"Invalid option: {char}. Press 1, 2, or Enter...")
+                            self._show_feedback(f"Invalid option: {char}. Press 1, 2, 3, 4, or Enter...")
                             time.sleep(1.5)
                             start_time = time.time()  # Reset timer
                             last_countdown_update = 0
@@ -211,8 +239,10 @@ class BootMenu:
             "",
             "  1. Start Demo Mode",
             "  2. Set RTC Time",
+            "  3. Set Wi-Fi" + (f" (now: {self.wifi_status})" if self.wifi_status else ""),
+            "  4. Time source" + (f" (now: {self.time_status})" if self.time_status else ""),
             "",
-            "  Press 1, 2, or Enter to continue...",
+            "  Press 1, 2, 3, 4, or Enter to continue...",
             "",
         ]
         if remaining is not None and remaining > 0:
@@ -306,16 +336,177 @@ class BootMenu:
     
     def handle_manual_time_setting(self):
         """Hold the video until the time has been entered and set (or entry is cancelled)"""
+        self._with_hold(self._enter_and_set_time)
+
+    def _with_hold(self, action):
+        """Run a menu screen with the service's video stopped and the display kept on"""
         hold = time_entry.acquire_hold()
         try:
-            self._enter_and_set_time()
+            action()
         finally:
             if hold:
                 hold.close()
+
+    def _get_key(self, valid_keys, timeout=ENTRY_TIMEOUT):
+        """Wait for one of these keys, returning it, or None for Enter, Ctrl+C or a timeout"""
+        self._setup_terminal_input()
+        try:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                char = self.get_char_blocking(timeout=0.5)
+                if char in ('\n', '\r', '\x03'):
+                    return None
+                if char and char in valid_keys:
+                    return char
+            return None
+        finally:
+            self._restore_terminal_input()
+
+    def _get_text_input(self, prompt, secret=False, timeout=ENTRY_TIMEOUT):
+        """
+        Read a line of text, returning it, or None if cancelled with Esc or Ctrl+C or
+        after no key for the timeout. If secret, it shows as stars until Tab is pressed.
+        """
+        text = ""
+        reveal = False
+        self._setup_terminal_input()
+
+        def show():
+            shown = text if reveal or not secret else "*" * len(text)
+            hint = "\n\n  Tab shows or hides it. " if secret else "\n\n  "
+            show_on_console(f"{prompt}\n  > {shown}{hint}Enter to confirm, Esc to cancel.\n")
+
+        try:
+            show()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                char = self.get_char_blocking(timeout=0.5)
+                if not char:
+                    continue
+                deadline = time.monotonic() + timeout
+                if char in ('\n', '\r'):
+                    return text
+                if char == '\x03':
+                    return None
+                if char == '\x1b':
+                    # Esc alone cancels, but arrow and function keys send Esc plus more
+                    following = self.get_char_blocking(timeout=0.05)
+                    if not following:
+                        return None
+                    while following and not (following.isalpha() or following == '~'):
+                        following = self.get_char_blocking(timeout=0.05)
+                    continue
+                if char == '\t':
+                    reveal = not reveal
+                elif char in ('\x7f', '\b'):
+                    text = text[:-1]
+                elif char.isprintable() and char != '\ufffd':
+                    text += char
+                show()
+            return None
+        finally:
+            self._restore_terminal_input()
+
+    def _ask_wifi_password(self, ssid, optional=False):
+        """Ask for a valid Wi-Fi password, returning it, or None if cancelled"""
+        prompt = f"{self.WIFI_HEADER}Password for {ssid}" + (" (leave empty if none):" if optional else ":")
+        problem = ""
+        while True:
+            password = self._get_text_input(problem + prompt, secret=True)
+            if password is None or (optional and password == ""):
+                return password
+            if not 8 <= len(password.encode()) <= 63:
+                problem = "A Wi-Fi password has 8 to 63 characters.\n\n"
+            elif password != password.strip():
+                # NetworkManager's editor would silently remove these
+                problem = "A password that starts or ends with a space can't be set here.\n\n"
+            else:
+                return password
+
+    WIFI_HEADER = "Set Wi-Fi\n" + "=" * 60 + "\n\n"
+
+    def _choose_wifi_network(self):
+        """Show visible networks, returning the chosen one's details, or None if cancelled"""
+        show_on_console(f"{self.WIFI_HEADER}Scanning for networks...\n")
+        networks = network_setup.scan()[:9]
+        lines = [f"  {number}. {network['ssid']} ({network['signal']}%, {network['security'].strip() or 'open'})"
+                 for number, network in enumerate(networks, 1)]
+        if not lines:
+            lines = ["  No networks found."]
+        show_on_console(f"{self.WIFI_HEADER}Choose a network:\n\n" + "\n".join(lines) +
+                        "\n\n  0. Type the name of a hidden network\n\n  Enter to cancel.\n")
+
+        key = self._get_key('0' + ''.join(str(n) for n in range(1, len(networks) + 1)))
+        if key is None:
+            return None
+        if key != '0':
+            return networks[int(key) - 1]
+
+        ssid = self._get_text_input(f"{self.WIFI_HEADER}Name of the hidden network:")
+        if not ssid or len(ssid.encode()) > 32:
+            return None
+        return {'ssid': ssid, 'security': '', 'hidden': True}
+
+    def _set_wifi(self):
+        """Choose a Wi-Fi network, enter its password and connect"""
+        try:
+            network = self._choose_wifi_network()
+            if network is None:
+                self.show_message("Wi-Fi not changed.", 2)
+                return
+
+            ssid = network['ssid']
+            hidden = network.get('hidden', False)
+            key_mgmt = 'wpa-psk' if hidden else network_setup.key_management(network['security'])
+            if key_mgmt == 'unsupported':
+                self.show_message(f"{ssid} uses {network['security']}, which can't be set up here.\nWi-Fi not changed.", 5)
+                return
+
+            password = None
+            if key_mgmt:
+                password = self._ask_wifi_password(ssid, optional=hidden)
+                if password is None:
+                    self.show_message("Wi-Fi not changed.", 2)
+                    return
+                if not password:  # A hidden network with no password
+                    key_mgmt = None
+
+            show_on_console(f"{self.WIFI_HEADER}Connecting to {ssid}...\nThis can take up to a minute.\n")
+            _, message = network_setup.connect(ssid, password, key_mgmt, hidden)
+            self.show_message(message, 5)
+        except Exception as e:
+            # Not the exception's text, in case it ever includes the password
+            self.logger.error(f"Error in Wi-Fi setup: {type(e).__name__}")
+            self.show_message("Wi-Fi setup failed. Wi-Fi may not have changed.", 5)
+
+    def _set_time_source(self):
+        """Show the time source, and offer to switch it"""
+        try:
+            ntp = self.time_sync.ntp_enabled()
+            now = "NTP when internet is available" if ntp else "RTC only"
+            other = "RTC only" if ntp else "NTP when internet is available"
+            show_on_console(f"Time source\n{'=' * 60}\n\nNow: {now}\n\n  1. Switch to {other}\n\n  Enter to leave it.\n")
+            if self._get_key('1') is None:
+                return
+
+            if not self.time_sync.set_ntp(not ntp):
+                self.show_message("Could not switch the time source.", 5)
+            elif ntp:
+                self.show_message("Time source: RTC only.\nSet the time from this menu if it needs correcting.", 5)
+            else:
+                self.show_message("Time source: NTP when internet is available.\nThe clock updates once the Pi reaches the internet.", 5)
+        except Exception as e:
+            self.logger.error(f"Error setting the time source: {e}")
+            self.show_message(f"Error: {str(e)}", 3)
     
     def _enter_and_set_time(self):
         """Handle manual RTC time setting - step-by-step entry"""
         try:
+            if self.time_sync.ntp_enabled():
+                self.show_message("NTP is on, so it would overwrite a time set here.\n"
+                                  "Switch the time source to RTC only first, with option 4.", 5)
+                return
+
             header = "Set RTC Time\n" + "=" * 60 + "\n\n"
             entered = ""
             values = []

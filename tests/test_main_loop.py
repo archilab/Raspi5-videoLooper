@@ -188,6 +188,24 @@ class DisplaySignal(MainLoopTestCase):
         self.assertEqual(self.display.sent, [])
 
 
+class RtcUpdates(MainLoopTestCase):
+    def test_updates_at_startup_then_every_interval(self):
+        update = self.looper.time_sync.update_rtc_from_ntp
+        counts = []
+        def advance(seconds):
+            def step():
+                self.clock = seconds
+            return step
+        self.run_passes(advance(300), lambda: counts.append(update.call_count),
+                        advance(600), None, lambda: counts.append(update.call_count))
+        self.assertEqual(counts, [1, 2])
+
+    def test_not_during_a_hold(self):
+        self.time_entry_active = True
+        self.run_passes(None, None)
+        self.looper.time_sync.update_rtc_from_ntp.assert_not_called()
+
+
 class ProjectorPower(MainLoopTestCase):
     def setUp(self):
         super().setUp()

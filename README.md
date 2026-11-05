@@ -5,9 +5,10 @@ Unattended video playback for a Raspberry Pi 5 driving a screen or projector, fo
 - Loops videos silently and fullscreen with VLC, starting on boot
 - Schedules by date and daily hours, with several time windows a day and overnight windows
 - Updates content from a USB drive when the service starts
-- Keeps time with the Pi's battery-backed real-time clock (RTC), with no network needed
+- Keeps time with the Pi's battery-backed real-time clock (RTC), with optional NTP when there's internet
 - Switches a projector on and off over USB serial, with no setup for known brands
 - Switches the HDMI signal off outside scheduled hours, so most displays go to sleep
+- Sets Wi-Fi and the time source from a menu on the screen
 
 ## Scheduling
 
@@ -58,7 +59,7 @@ The script changes the whole system, so read it first on a Pi that has other use
 - Upgrades all packages, and installs VLC, `python3-serial` and others
 - Creates the `looper` user, which runs everything, and sets it to log in automatically on the HDMI console
 - If `looper` already exists and `admin` doesn't, creates `admin` with **passwordless sudo**
-- **Disables NTP**, because the system runs on the RTC alone
+- **Disables NTP**, so the system runs on the RTC alone until you switch it in the boot menu. Running the script again switches it back
 - Sets up USB automounting at `/media/usb1` to `/media/usb4`
 - Installs and starts the `video-looper` and `rtc-time-restore` services
 - Creates example folders dated 2024, containing empty placeholder videos, which you can delete
@@ -91,17 +92,31 @@ After each boot, the HDMI console shows the folder list for 10 seconds, then thi
 |---|---|
 | `1` | Demo mode: plays each folder for one minute with 30 seconds between, ignoring schedules |
 | `2` | Set the date and time |
+| `3` | Set Wi-Fi |
+| `4` | Choose the time source |
 | `Enter` | Continue, which also happens when the countdown ends |
 
-The service's video can start while the menu is on screen and cover it. Pressing `1` or `2` still works: the video stops within a couple of seconds, and returns by itself when you're done.
+The service's video can start while the menu is on screen and cover it. Pressing a number still works: the video stops within a couple of seconds, and returns by itself when you're done.
 
 The HDMI signal stays on for this menu even when nothing is scheduled. A projector doesn't switch on for it, though, so if a projector is your only screen, switch it on with its own remote first.
 
+## Wi-Fi
+
+Press `3` at the boot menu to choose a network from a list of the nine strongest, or `0` to type the name of a hidden one, then enter its password. The password shows as stars, and Tab shows or hides it, which helps on an unfamiliar keyboard.
+
+- **Failures:** if the connection fails, for example with a wrong password, the attempt is removed and the Pi reconnects to the previous network.
+- **Remembered networks:** networks stay saved, and the most recently set one is preferred. A new network usually gives the Pi a new IP address, which the screen shows.
+- **Not supported:** WEP and enterprise (802.1X) networks, and passwords that start or end with a space.
+- **Passwords:** they aren't logged or passed on a command line, and NetworkManager stores them in a file only root can read.
+- **Keyboard:** the characters you get depend on the Pi's keyboard layout, set in `/etc/default/keyboard`.
+
 ## Time
 
-The system uses only the RTC, with NTP disabled. The time is loaded from the RTC at startup, so **schedules are only as accurate as the RTC**.
+By default the system uses only the RTC, so **schedules are only as accurate as the RTC**. The time is loaded from the RTC at startup.
 
-**To set the time**, press `2` at the boot menu and enter the year, month, day, hour and minute. A value with fewer digits than the prompt's maximum, like `5` for May, needs `Enter`. Seconds are set to `00`. The video waits until you finish or cancel, and the service then rechecks the schedule. Each step cancels itself after 60 seconds.
+**To use NTP**, press `4` at the boot menu. The clock then follows NTP when the Pi can reach the internet, and the choice survives reboots. The RTC is updated from NTP every 10 minutes, so the time stays right after a power cut with no internet. Without internet the Pi carries on using the RTC, and NTP keeps retrying.
+
+**To set the time by hand**, first make sure the time source is RTC only, because NTP would overwrite it. Then press `2` at the boot menu and enter the year, month, day, hour and minute. A value with fewer digits than the prompt's maximum, like `5` for May, needs `Enter`. Seconds are set to `00`. The video waits until you finish or cancel, and the service then rechecks the schedule. Each step cancels itself after 60 seconds.
 
 **RTC battery:** without a working battery, the RTC stops while the Pi has no power and comes back wrong. If you use the official rechargeable Raspberry Pi RTC battery, enable charging in `/boot/firmware/config.txt` and reboot:
 
@@ -225,6 +240,8 @@ sudo journalctl -u video-looper -f
 | Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual. A settings file replaces the automatic commands |
 | Projector stays off after a short gap or restart | It may have ignored the start while cooling down. Use longer gaps between time windows |
 | Service won't start | `sudo journalctl -u video-looper -n 50` |
+| Wi-Fi won't connect | Show the password with Tab to check the keyboard layout. `nmcli device wifi list` shows what the Pi can see |
+| Clock is wrong with NTP on | Check the Pi can reach the internet, and run `timedatectl status` |
 
 Only warnings and errors are logged, to the system journal and not to a file, to reduce SD card wear. Errors from the boot menu aren't logged, because the login script discards them. The journal may not survive a reboot, depending on the system's configuration.
 
@@ -241,7 +258,8 @@ The boot menu is a separate process started by the console login. When it needs 
 | `player.py` | VLC, and the display and projector around playback |
 | `boot_menu.py` | Menu screens, key input, time prompts, demo mode |
 | `time_entry.py` | The hold and time handoff between menu and service |
-| `time_sync.py` | Reads and writes the RTC and system clock |
+| `time_sync.py` | Reads and writes the RTC and system clock, and switches NTP |
+| `network_setup.py` | Scans for and connects to Wi-Fi through `nmcli` |
 | `usb_sync.py` | USB detection, sync planning and safe copying |
 | `hdmi_controller.py` | Switches the HDMI signal on and off |
 | `projector_controller.py` | Finds the USB serial adapter, and sends projector commands |
@@ -249,6 +267,7 @@ The boot menu is a separate process started by the console login. When it needs 
 | `constants.py` | Shared settings, like paths, the check interval and the known projector brands |
 | `video-looper.service`, `rtc-time-restore.service` | The two systemd services |
 | `99-looper-rtc.rules` | Gives `looper` access to the RTC device |
+| `50-looper-network-time.rules` | Lets `looper` change Wi-Fi and switch NTP |
 | `install.sh`, `deploy.sh` | Set up a Pi, and update its code |
 
 ## Development
@@ -270,9 +289,9 @@ Other options are `--restart` to force a restart, and `--allow-usb-delete` to ov
 
 ## Security notes
 
-- The services run as `looper` and need no network. They hold the capability to set the clock. `video-looper` has one short step that runs as root at startup, to give `looper` write access to the HDMI blank file.
+- The services run as `looper` and don't need a network, unless you switch on NTP. They hold the capability to set the clock. `video-looper` has one short step that runs as root at startup, to give `looper` write access to the HDMI blank file.
 - `install.sh` gives `hwclock` that capability too, and the RTC rule gives `looper` the device, so the `looper` user can change the clock outside the services.
-- The HDMI console logs in as `looper` automatically, so anyone with a keyboard on the Pi gets that user's shell.
+- The HDMI console logs in as `looper` automatically, so anyone with a keyboard on the Pi gets that user's shell. That includes `looper`'s permission to change Wi-Fi and NTP, through `50-looper-network-time.rules`.
 - `admin`, when `install.sh` creates it, has passwordless `sudo`, so protect its SSH access.
 - Every USB serial adapter receives the projector commands unless a folder's settings say otherwise, so don't connect other serial devices without checking.
 

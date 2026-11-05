@@ -29,6 +29,7 @@ TIME_FORMAT = '%H%M'
 # Timing constants
 CHECK_INTERVAL = 30  # seconds
 HDMI_WAKE_DELAY = 2  # seconds
+RTC_UPDATE_INTERVAL = 600  # seconds between writing NTP time to the RTC
 BOOT_MENU_GRACE = 60  # seconds after the service starts before the HDMI signal may go off,
                       # so the boot menu stays visible when nothing is scheduled
 

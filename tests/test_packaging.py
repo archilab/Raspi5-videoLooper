@@ -44,6 +44,22 @@ class Packaging(unittest.TestCase):
         unit = (ROOT / 'video-looper.service').read_text()
         self.assertIn('chmod g+w /sys/class/graphics/fb0/blank', unit)
 
+    def test_install_and_deploy_ship_the_polkit_rule(self):
+        name = '50-looper-network-time.rules'
+        self.assertIn(name, (ROOT / 'install.sh').read_text())
+        self.assertIn(name, (ROOT / 'deploy.sh').read_text())
+        self.assertIn('etc/polkit-1/rules.d', (ROOT / 'deploy.sh').read_text())
+
+    def test_polkit_rule_only_covers_looper_and_only_these_actions(self):
+        rule = (ROOT / '50-looper-network-time.rules').read_text()
+        self.assertIn('subject.user != "looper"', rule)
+        self.assertEqual(sorted(re.findall(r'case "([^"]+)"', rule)), [
+            'org.freedesktop.NetworkManager.network-control',
+            'org.freedesktop.NetworkManager.settings.modify.system',
+            'org.freedesktop.NetworkManager.wifi.scan',
+            'org.freedesktop.timedate1.set-ntp',
+        ])
+
     def test_install_and_deploy_ship_the_rtc_rule(self):
         self.assertIn('99-looper-rtc.rules', (ROOT / 'install.sh').read_text())
         self.assertIn('99-looper-rtc.rules', (ROOT / 'deploy.sh').read_text())

@@ -18,7 +18,9 @@ from player import Player
 from projector_controller import ProjectorController
 from time_sync import TimeSyncManager
 from usb_sync import USBSync
-from constants import BOOT_MENU_GRACE, CHECK_INTERVAL, DEFAULT_SERIAL_PORT, DEFAULT_VIDEOS_PATH
+from constants import (
+    BOOT_MENU_GRACE, CHECK_INTERVAL, DEFAULT_SERIAL_PORT, DEFAULT_VIDEOS_PATH, RTC_UPDATE_INTERVAL
+)
 
 
 class VideoLooper:
@@ -78,6 +80,7 @@ class VideoLooper:
         
         current_folder = None
         time_entry_held = False
+        last_rtc_update = None
         while self.running:
             try:
                 # Boot menu needs the screen, to set the time or run the demo: keep it free
@@ -93,6 +96,10 @@ class VideoLooper:
                     time.sleep(0.5)
                     continue
                 time_entry_held = False
+
+                if last_rtc_update is None or time.monotonic() - last_rtc_update >= RTC_UPDATE_INTERVAL:
+                    last_rtc_update = time.monotonic()
+                    self.time_sync.update_rtc_from_ntp()
 
                 active_folder_info = scheduler.find_active_folder(self.videos_path)
                 
@@ -319,7 +326,7 @@ def main():
     
     elif args.display_folder_info:
         # Display folder information on screen and show boot menu
-        menu = BootMenu(looper.videos_path, looper.player)
+        menu = BootMenu(looper.videos_path, looper.player, looper.time_sync)
         menu_result = menu.display_folder_info_on_screen()
         
         # Check if demo mode was selected

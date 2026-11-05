@@ -1,0 +1,14 @@
+// Lets the boot menu, which runs as looper, change Wi-Fi and switch NTP on or off.
+polkit.addRule(function(action, subject) {
+    if (subject.user != "looper") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    switch (action.id) {
+    case "org.freedesktop.NetworkManager.network-control":
+    case "org.freedesktop.NetworkManager.settings.modify.system":
+    case "org.freedesktop.NetworkManager.wifi.scan":
+    case "org.freedesktop.timedate1.set-ntp":
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

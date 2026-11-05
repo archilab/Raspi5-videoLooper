@@ -95,6 +95,82 @@ class SetManually(TimeSyncTestCase):
         manager._set_system_time.assert_not_called()
 
 
+class TimeSource(TimeSyncTestCase):
+    def setUp(self):
+        super().setUp()
+        self.synced_file = Path(time_sync.RTC_EPOCH_FILE).with_name('synced')
+        patcher = mock.patch.object(time_sync, 'NTP_SYNCED_FILE', str(self.synced_file))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def timedatectl(self, stdout='', returncode=0):
+        def run(cmd, **kwargs):
+            self.commands.append(cmd)
+            return SimpleNamespace(returncode=returncode if cmd[0] == 'timedatectl' else 0, stdout=stdout, stderr='no')
+        patcher = mock.patch.object(time_sync.subprocess, 'run', run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        manager = time_sync.TimeSyncManager()
+        manager.hwclock_cmd = '/x/hwclock'
+        return manager
+
+    def test_reads_whether_ntp_is_on(self):
+        self.assertTrue(self.timedatectl('yes\n').ntp_enabled())
+        self.assertFalse(self.timedatectl('no\n').ntp_enabled())
+
+    def test_switching(self):
+        manager = self.timedatectl()
+        self.assertTrue(manager.set_ntp(True))
+        self.assertTrue(manager.set_ntp(False))
+        self.assertEqual(self.commands, [['timedatectl', 'set-ntp', 'true'], ['timedatectl', 'set-ntp', 'false']])
+
+    def test_failed_switch_is_reported(self):
+        manager = self.timedatectl(returncode=1)
+        with self.assertLogs('time_sync', logging.ERROR):
+            self.assertFalse(manager.set_ntp(True))
+
+    def test_missing_timedatectl_counts_as_off(self):
+        with mock.patch.object(time_sync.subprocess, 'run', side_effect=FileNotFoundError('gone')), \
+                self.assertLogs('time_sync', logging.ERROR):
+            self.assertFalse(time_sync.TimeSyncManager().ntp_enabled())
+
+    def test_synced_needs_ntp_on_and_the_file(self):
+        manager = self.timedatectl('yes\n')
+        self.assertFalse(manager.is_ntp_synced())
+        self.synced_file.write_text('')
+        self.assertTrue(manager.is_ntp_synced())
+        self.assertFalse(self.timedatectl('no\n').is_ntp_synced())
+
+    def test_no_timedatectl_call_before_the_first_sync(self):
+        """This runs early in boot, when timedatectl can't answer yet"""
+        manager = self.timedatectl('yes\n')
+        manager.is_ntp_synced()
+        self.assertEqual(self.commands, [])
+
+    def test_rtc_is_updated_only_when_synced(self):
+        manager = self.timedatectl('yes\n')
+        manager.update_rtc_from_ntp()
+        self.assertEqual(self.commands, [])
+        self.synced_file.write_text('')
+        manager.update_rtc_from_ntp()
+        self.assertIn(WRITE_COMMAND, self.commands)
+
+    def test_startup_keeps_ntp_time_over_the_rtc(self):
+        self.synced_file.write_text('')
+        manager = self.timedatectl('yes\n')
+        self.assertTrue(manager.sync_time())
+        self.assertNotIn(LOAD_COMMAND, self.commands)
+
+    def test_startup_uses_the_rtc_otherwise(self):
+        manager = self.timedatectl('yes\n')
+        self.assertTrue(manager.sync_time())
+        self.assertIn(LOAD_COMMAND, self.commands)
+
+    def test_status_shows_the_source(self):
+        self.assertEqual(self.timedatectl('yes\n').get_time_status()['mode'], 'NTP when internet is available')
+        self.assertEqual(self.timedatectl('no\n').get_time_status()['mode'], 'RTC only')
+
+
 class LowLevel(unittest.TestCase):
     def test_settimeofday_values_and_error(self):
         libc = mock.Mock()

@@ -65,10 +65,9 @@ check_dependencies() {
     fi
     
     if systemctl is-active --quiet systemd-timesyncd; then
-        echo -e "${YELLOW}⚠ systemd-timesyncd is running, but this system should use only the RTC${NC}"
-        echo "Disable with: sudo systemctl disable --now systemd-timesyncd"
+        echo -e "${GREEN}✓ Time source is NTP when internet is available${NC}"
     else
-        echo -e "${GREEN}✓ NTP is off, the system runs on the RTC${NC}"
+        echo -e "${GREEN}✓ Time source is RTC only${NC}"
     fi
 }
 
@@ -141,6 +140,9 @@ check_time_sync() {
     echo "System time status:"
     timedatectl status | grep -E "(NTP|RTC|Time zone)"
     
+    echo ""
+    echo "Wi-Fi: $(nmcli -t -f ACTIVE,SSID device wifi list --rescan no 2>/dev/null | grep '^yes' | cut -d: -f2- || true)"
+
     echo ""
     if [ -e /sys/class/rtc/rtc0/since_epoch ]; then
         rtc_seconds=$(cat /sys/class/rtc/rtc0/since_epoch)

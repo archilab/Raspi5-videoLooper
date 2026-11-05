@@ -308,7 +308,13 @@ class VideoLooper:
         try:
             if sys.stdin.isatty():
                 self.old_settings = termios.tcgetattr(sys.stdin)
-                tty.setraw(sys.stdin.fileno())
+                fd = sys.stdin.fileno()
+                tty.setraw(fd)
+                # The menus draw on this same terminal, and setraw also turns off
+                # output processing, which makes each "\n" continue on the same column.
+                attrs = termios.tcgetattr(fd)
+                attrs[1] |= termios.OPOST | termios.ONLCR
+                termios.tcsetattr(fd, termios.TCSANOW, attrs)
                 return True
         except Exception:
             pass

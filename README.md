@@ -17,16 +17,21 @@ Name a folder like this:
 YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
 ```
 
+To play in several time windows a day, join them with `_and_`.
+
 | Folder name | Plays |
 |---|---|
 | `2026-12-01_to_2026-12-31_1000_to_2200` | Every day in December, 10:00 to 22:00 |
 | `2026-06-15_to_2026-06-30_0800_to_2000` | June 15–30, 08:00 to 20:00 |
 | `2026-12-01_to_2026-12-03_2200_to_0600` | Overnight: 22:00 on Dec 1 until 06:00 on Dec 4 |
+| `2026-12-01_to_2026-12-31_0500_to_0900_and_1600_to_2300` | Every day in December, 05:00 to 09:00 and 16:00 to 23:00 |
+| `2026-12-01_to_2026-12-31_0700_to_0900_and_1200_to_1400_and_1800_to_2200` | Three windows every day in December |
 
 - **Overnight windows:** if the end time is before the start time, the window starts on each date in the range and ends the next morning. The last night therefore runs into the morning after the end date.
+- **Between windows:** the video and projector stop and the HDMI signal goes off, unless another folder is active. A window can be overnight, and windows that touch or overlap play without a restart.
 - **Overlaps:** if several folders are active, the one with the latest start date plays. Give overlapping folders different start dates, since the winner is otherwise arbitrary.
 - **Videos:** every video in the folder loops in filename order. Supported: `.mp4 .avi .mov .mkv .wmv .flv .webm .m4v`.
-- **Ignored:** folders with no videos or a name that doesn't match, and files starting with `.`.
+- **Ignored:** folders with no videos or a name that doesn't match, and files starting with `.`. The whole name must match, so one bad window or extra text makes a folder invalid. It won't play, and USB sync neither copies nor removes it. If it starts like a schedule, a warning is logged.
 - **Timing:** the schedule is checked every 30 seconds, so changes take up to 30 seconds to apply. You can add folders without restarting.
 
 ```

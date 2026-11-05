@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Decides what should play, from folder names in the videos directory
-Format: YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
-Example: 2024-01-01_to_2024-01-31_0900_to_1800
+Format: YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM, with more windows joined by _and_
+Examples: 2024-01-01_to_2024-01-31_0900_to_1800
+          2024-01-01_to_2024-01-31_0500_to_0900_and_1600_to_2300
 
-If the end time is before the start time the window runs overnight. It starts on each
+If a window's end time is before its start time it runs overnight. It starts on each
 date in the range, so the last night continues into the morning after the end date:
 2024-01-01_to_2024-01-03_2200_to_0600 plays from 22:00 on Jan 1 until 06:00 on Jan 4.
 """
@@ -15,36 +16,47 @@ from datetime import datetime, timedelta
 from constants import FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT, VIDEO_EXTENSIONS
 
 logger = logging.getLogger(__name__)
+_warned_names = set()
 
 
 def parse_folder_name(folder_name):
-    """Return a folder's schedule as a dict, or None if the name isn't a valid schedule"""
-    match = re.match(FOLDER_NAME_PATTERN, folder_name)
-
-    if not match:
-        return None
+    """
+    Return a folder's schedule as a dict, or None if the name isn't a valid schedule
+    'windows' is a list of (start_time, end_time) pairs
+    """
+    match = re.fullmatch(FOLDER_NAME_PATTERN, folder_name)
 
     try:
-        return {
-            'start_date': datetime.strptime(match.group(1), DATE_FORMAT).date(),
-            'end_date': datetime.strptime(match.group(2), DATE_FORMAT).date(),
-            'start_time': datetime.strptime(match.group(3), TIME_FORMAT).time(),
-            'end_time': datetime.strptime(match.group(4), TIME_FORMAT).time()
-        }
+        if match:
+            windows = []
+            for window in match.group(3).split('_and_'):
+                start_time, end_time = window.split('_to_')
+                windows.append((datetime.strptime(start_time, TIME_FORMAT).time(),
+                                datetime.strptime(end_time, TIME_FORMAT).time()))
+            return {
+                'start_date': datetime.strptime(match.group(1), DATE_FORMAT).date(),
+                'end_date': datetime.strptime(match.group(2), DATE_FORMAT).date(),
+                'windows': windows
+            }
     except ValueError:
-        return None
+        pass
+
+    _warn_if_mistyped(folder_name)
+    return None
 
 
-def is_folder_active(folder_name, now=None):
-    """Check if a folder should be playing at a given time (default: now)"""
-    schedule = parse_folder_name(folder_name)
-    if not schedule:
-        return False
+def _warn_if_mistyped(folder_name):
+    """Warn once about a name that looks like a schedule but isn't, since it won't play"""
+    if re.match(r'\d{4}-\d{2}-\d{2}_to_', folder_name) and folder_name not in _warned_names:
+        _warned_names.add(folder_name)
+        logger.warning(f"Ignoring folder with an invalid schedule name: {folder_name}")
 
-    now = now or datetime.now()
-    today, current_time = now.date(), now.time()
+
+def _in_window(window, schedule, now):
+    """Check if a time is inside one daily window of a schedule"""
+    start_time, end_time = window
     start_date, end_date = schedule['start_date'], schedule['end_date']
-    start_time, end_time = schedule['start_time'], schedule['end_time']
+    today, current_time = now.date(), now.time()
 
     if start_time <= end_time:
         return start_date <= today <= end_date and start_time <= current_time <= end_time
@@ -55,6 +67,16 @@ def is_folder_active(folder_name, now=None):
     if current_time <= end_time:
         return start_date <= today - timedelta(days=1) <= end_date
     return False
+
+
+def is_folder_active(folder_name, now=None):
+    """Check if a folder should be playing at a given time (default: now)"""
+    schedule = parse_folder_name(folder_name)
+    if not schedule:
+        return False
+
+    now = now or datetime.now()
+    return any(_in_window(window, schedule, now) for window in schedule['windows'])
 
 
 def get_video_files(folder_path):

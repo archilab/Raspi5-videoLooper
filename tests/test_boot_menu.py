@@ -134,6 +134,14 @@ class Screens(MenuTestCase):
         self.assertIn('clip.mp4 (0.0 MB)', self.screen())
 
 
+    def test_folder_list_shows_every_window(self):
+        make_tree(self.tmp / 'videos', {'2026-02-01_to_2026-02-02_0500_to_0900_and_1600_to_2300': {'clip.mp4': ''}})
+        with mock.patch('time.sleep'), mock.patch('builtins.print'), \
+                mock.patch.object(self.menu, 'display_boot_menu'):
+            self.menu.display_folder_info_on_screen()
+        self.assertIn('Schedule: 2026-02-01 to 2026-02-02, 05:00 to 09:00 and 16:00 to 23:00', self.screen())
+
+
 class MenuKeys(MenuTestCase):
     def press(self, *keys):
         with mock.patch('time.sleep'), mock.patch.object(self.menu, '_setup_terminal_input'), \

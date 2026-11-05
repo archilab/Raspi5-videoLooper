@@ -21,7 +21,8 @@ VIDEO_EXTENSIONS: FrozenSet[str] = frozenset({
 PROJECTOR_CONFIG_FILES = ['projector.txt', 'projector.conf', 'config.txt']
 
 # Folder naming
-FOLDER_NAME_PATTERN = r'(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(\d{4})_to_(\d{4})'
+# Start date, end date, then one or more time windows joined by _and_
+FOLDER_NAME_PATTERN = r'(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(\d{4}_to_\d{4}(?:_and_\d{4}_to_\d{4})*)'
 DATE_FORMAT = '%Y-%m-%d'
 TIME_FORMAT = '%H%M'
 

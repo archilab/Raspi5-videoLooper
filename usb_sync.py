@@ -10,12 +10,10 @@ import logging
 import shutil
 import time
 from pathlib import Path
-import re
-from datetime import datetime
+import scheduler
 from console import show_on_console
 from constants import (
-    VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN,
-    DATE_FORMAT, TIME_FORMAT, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
+    VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
 )
 
 class USBSync:
@@ -139,7 +137,7 @@ class USBSync:
         """
         Check if a folder is a valid video folder
         Valid folder must:
-        1. Match the naming pattern: YYYY-MM-DD_to_YYYY-MM-DD_HHMM_to_HHMM
+        1. Have a valid schedule name (see scheduler.py)
         2. Contain at least one video file
         Args:
             folder_path: Path to folder to check
@@ -153,21 +151,9 @@ class USBSync:
         if folder_path.name.startswith('.'):
             return False
         
-        # Check folder name pattern
-        match = re.match(FOLDER_NAME_PATTERN, folder_path.name)
-        
-        if not match:
+        if not scheduler.parse_folder_name(folder_path.name):
             return False
-        
-        # Validate date format
-        try:
-            datetime.strptime(match.group(1), DATE_FORMAT).date()
-            datetime.strptime(match.group(2), DATE_FORMAT).date()
-            datetime.strptime(match.group(3), TIME_FORMAT).time()
-            datetime.strptime(match.group(4), TIME_FORMAT).time()
-        except ValueError:
-            return False
-        
+
         # Check if folder contains at least one video file
         try:
             for file_path in folder_path.iterdir():

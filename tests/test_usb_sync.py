@@ -62,6 +62,32 @@ class Planning(UsbSyncTestCase):
         self.assertIsNone(sync.find_sync_source([empty]))
 
 
+class ScheduleNames(UsbSyncTestCase):
+    SEVERAL = '2026-01-01_to_2026-01-02_0500_to_0900_and_1600_to_2300'
+    BAD = '2026-01-01_to_2026-01-02_0500_to_0900_and_1600'
+
+    def test_several_windows_are_synced(self):
+        sync = self.setup_drives({self.SEVERAL: VIDEO}, {})
+        self.assertTrue(sync.sync_usb_to_local(self.usb))
+        self.assertEqual(sorted(read_tree(self.local)), [self.SEVERAL])
+
+    def test_bad_name_is_not_copied(self):
+        sync = self.setup_drives({self.BAD: VIDEO, FA: VIDEO}, {})
+        self.assertEqual(sync.plan_sync(self.usb)['copy'], [FA])
+
+    def test_bad_local_name_is_left_alone(self):
+        sync = self.setup_drives({FA: VIDEO}, {self.BAD: {'other.mp4': 'x'}})
+        self.assertEqual(sync.plan_sync(self.usb), {'update': [], 'copy': [FA], 'rename': [], 'delete': []})
+
+    def test_two_folders_can_become_one(self):
+        """Replacing two single-window folders with one that has both windows"""
+        sync = self.setup_drives({self.SEVERAL: VIDEO}, {FA: VIDEO, FB: VIDEO})
+        self.assertEqual(sync.plan_sync(self.usb),
+                         {'update': [], 'copy': [], 'rename': [(FA, self.SEVERAL)], 'delete': [FB]})
+        self.assertTrue(sync.sync_usb_to_local(self.usb))
+        self.assertEqual(sorted(read_tree(self.local)), [self.SEVERAL])
+
+
 class Syncing(UsbSyncTestCase):
     def test_redate(self):
         sync = self.setup_drives({FC: VIDEO, FD: VIDEO}, {FA: VIDEO, FB: VIDEO})

@@ -55,9 +55,11 @@ class BootMenu:
                     if schedule:
                         start_date = schedule['start_date'].strftime('%Y-%m-%d')
                         end_date = schedule['end_date'].strftime('%Y-%m-%d')
-                        start_time = schedule['start_time'].strftime('%H:%M')
-                        end_time = schedule['end_time'].strftime('%H:%M')
-                        lines.append(f"     Schedule: {start_date} to {end_date}, {start_time} to {end_time}")
+                        windows = " and ".join(
+                            f"{start.strftime('%H:%M')} to {end.strftime('%H:%M')}"
+                            for start, end in schedule['windows']
+                        )
+                        lines.append(f"     Schedule: {start_date} to {end_date}, {windows}")
                     else:
                         lines.append("     Schedule: Unknown")
                     

@@ -5,25 +5,21 @@ Synchronizes video folders between USB drive and local videos directory on boot
 """
 
 import os
-import sys
 import logging
 import shutil
 import time
 from pathlib import Path
 import re
 from datetime import datetime
-import subprocess
 from constants import (
     VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN,
-    DATE_FORMAT, TIME_FORMAT, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH,
-    DEFAULT_LOG_FILE
+    DATE_FORMAT, TIME_FORMAT, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
 )
 
 class USBSync:
-    def __init__(self, local_videos_path=None, log_file=None):
+    def __init__(self, local_videos_path=None):
         self.logger = logging.getLogger(__name__)
         self.local_videos_path = Path(local_videos_path or DEFAULT_VIDEOS_PATH)
-        self.log_file = log_file or DEFAULT_LOG_FILE
     
     def display_message_on_screen(self, message):
         """
@@ -559,7 +555,7 @@ class USBSync:
                 rtc_file_path = Path(usb_mount) / rtc_file_name
                 
                 if rtc_file_path.exists() and rtc_file_path.is_file():
-                    time_sync = TimeSyncManager(self.log_file)
+                    time_sync = TimeSyncManager()
                     if time_sync.set_rtc_from_file(str(rtc_file_path)):
                         return True
                     else:
@@ -579,7 +575,6 @@ class USBSync:
         Returns:
             bool: True if USB was found and synced, False otherwise
         """
-        import time
         time.sleep(2)
         
         usb_mounts = self.find_usb_drives()

@@ -82,7 +82,7 @@ If you prefer manual installation:
 1. **Install dependencies**:
    ```bash
    sudo apt update
-   sudo apt install -y vlc python3 python3-pip python3-venv git ffmpeg python3-requests python3-serial cec-utils
+   sudo apt install -y vlc python3 python3-pip git ffmpeg python3-requests python3-serial cec-utils
    ```
 
 2. **Create looper user** (if it doesn't exist):
@@ -615,7 +615,7 @@ python3 video_looper.py --projector-stop
 You can customize the videos directory and log file location:
 
 ```bash
-python3 video_looper.py --videos-path /custom/videos/path --log-file /custom/log/path
+python3 video_looper.py --videos-path /custom/videos/path
 ```
 
 ### Service Configuration
@@ -658,7 +658,6 @@ The systemd service file (`/etc/systemd/system/video-looper.service`) runs as th
 
 5. **Permission issues**:
    - Ensure looper user owns directories: `sudo chown -R looper:looper /home/looper/videos`
-   - Check log file permissions: `sudo chown looper:looper /var/log/video_looper.log`
    - Verify looper user exists: `id looper`
 
 6. **Projector control issues**:
@@ -773,7 +772,6 @@ Raspi5-videoLooper/
 ├── setup_examples.sh        # Example folder structure setup
 ├── troubleshoot.sh          # Troubleshooting and diagnostics
 ├── projector_config_examples.txt # Projector configuration examples
-├── config.conf              # Configuration file
 ├── README.md               # This documentation
 └── .gitattributes          # Git configuration
 ```

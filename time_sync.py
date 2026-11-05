@@ -11,7 +11,6 @@ import ctypes.util
 import logging
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -19,10 +18,9 @@ from datetime import datetime
 
 
 class TimeSyncManager:
-    def __init__(self, log_file="/var/log/video_looper.log"):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.last_sync = None
-        self.running = False
         self.hwclock_cmd = self._resolve_cmd(
             "hwclock",
             "/usr/sbin/hwclock",
@@ -62,17 +60,6 @@ class TimeSyncManager:
             self.logger.error(f"hwclock not found; tried {', '.join([p for p in fallbacks if p])}")
         return None
 
-    def _sudo_cmd(self, cmd):
-        """Run commands directly; service gains CAP_SYS_TIME via systemd."""
-        return cmd
-
-    def check_internet_connection(self, timeout=5):
-        try:
-            socket.create_connection(("8.8.8.8", 53), timeout)
-            return True
-        except OSError:
-            return False
-
     def write_system_time_to_rtc(self):
         if not self.hwclock_cmd:
             self.logger.error("hwclock not found; cannot write system time to RTC")
@@ -80,7 +67,7 @@ class TimeSyncManager:
         try:
             result = subprocess.run(
                 # --noadjfile: /etc/adjtime is root-only, and the RTC is kept in UTC
-                self._sudo_cmd([self.hwclock_cmd, "--systohc", "--noadjfile", "--utc"]),
+                [self.hwclock_cmd, "--systohc", "--noadjfile", "--utc"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -158,7 +145,7 @@ class TimeSyncManager:
             for cmd in commands_to_try:
                 try:
                     result = subprocess.run(
-                        self._sudo_cmd(cmd),
+                        cmd,
                         capture_output=True,
                         text=True,
                         timeout=10,
@@ -186,7 +173,7 @@ class TimeSyncManager:
                             # Set system time using date command
                             date_cmd = f"date -s '@{rtc_epoch}'"
                             result = subprocess.run(
-                                self._sudo_cmd(["sh", "-c", date_cmd]),
+                                ["sh", "-c", date_cmd],
                                 capture_output=True,
                                 text=True,
                                 timeout=10,
@@ -210,7 +197,7 @@ class TimeSyncManager:
             if result.returncode == 0:
                 # Now try to read from RTC using hwclock again
                 result = subprocess.run(
-                    self._sudo_cmd([self.hwclock_cmd, "--hctosys"]),
+                    [self.hwclock_cmd, "--hctosys"],
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -233,11 +220,6 @@ class TimeSyncManager:
         if self.load_system_time_from_rtc():
             return True
         self.logger.error("Failed to load system time from RTC.")
-        return False
-
-    # Compatibility helpers to keep video_looper intact -----------------
-    def sync_rtc_with_ntp(self):
-        """NTP disabled - no-op. Use set_time_manually or write_system_time_to_rtc instead."""
         return False
 
     def _set_system_time_direct(self, dt):
@@ -361,14 +343,6 @@ class TimeSyncManager:
             self.logger.error(f"Time set failed: {e}")
             return False
 
-    def start_background_sync(self):
-        """No-op in simplified mode."""
-        self.running = False
-
-    def stop_background_sync(self):
-        """No-op in simplified mode."""
-        self.running = False
-
     def get_time_status(self):
         return {
             "rtc_available": self.hwclock_cmd is not None,
@@ -386,12 +360,6 @@ def main():
         action="store_true",
         help="Load system time from RTC (RTC-only mode, NTP disabled)",
     )
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        default="/var/log/video_looper.log",
-        help="Path to log file",
-    )
     args = parser.parse_args()
 
     # Minimal logging - WARNING and ERROR only, no file writes to reduce SD card wear
@@ -401,7 +369,7 @@ def main():
         handlers=[logging.StreamHandler(sys.stderr)],  # Only stderr, no file
     )
 
-    manager = TimeSyncManager(args.log_file)
+    manager = TimeSyncManager()
 
     if args.sync:
         ok = manager.sync_time()

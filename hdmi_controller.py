@@ -10,9 +10,8 @@ import shutil
 import time
 
 class HDMIController:
-    def __init__(self, log_file="/var/log/video_looper.log"):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.log_file = log_file
         self.cec_client_path = self._find_cec_client()
     
     def _find_cec_client(self):

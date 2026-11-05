@@ -110,15 +110,6 @@ check_files() {
 check_logs() {
     echo -e "${YELLOW}Checking recent logs...${NC}"
     
-    if [ -f "/var/log/video_looper.log" ]; then
-        echo -e "${GREEN}✓ Log file exists${NC}"
-        echo "Last 10 lines:"
-        tail -10 /var/log/video_looper.log
-    else
-        echo -e "${YELLOW}⚠ Log file not found${NC}"
-    fi
-    
-    echo ""
     echo "Recent systemd logs:"
     journalctl -u video-looper --since "1 hour ago" --no-pager | tail -10
 }

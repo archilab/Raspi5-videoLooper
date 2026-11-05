@@ -5,8 +5,6 @@ from typing import FrozenSet
 
 # Paths
 DEFAULT_VIDEOS_PATH = "/home/looper/videos"
-DEFAULT_LOG_FILE = "/var/log/video_looper.log"
-DEFAULT_INSTALL_DIR = "/home/looper/video_looper"
 # Locked by the boot menu while the time is being entered; in RAM, so no SD card writes
 TIME_ENTRY_LOCK_FILE = "/dev/shm/video_looper_time_entry.lock"
 # The menu has no permission to change the clock, so it asks the service through these
@@ -29,7 +27,6 @@ TIME_FORMAT = '%H%M'
 
 # Timing constants
 CHECK_INTERVAL = 30  # seconds
-VIDEO_STOP_TIMEOUT = 5  # seconds
 HDMI_WAKE_DELAY = 2  # seconds
 
 # Serial communication defaults (Optoma)
@@ -46,10 +43,4 @@ USB_MOUNT_POINTS = [
     '/media/usb2',
     '/media/usb3'
 ]
-
-# Test mode constants
-TEST_MODE_KEY_CTRL = 29  # Left Ctrl key code (Linux input event)
-TEST_MODE_KEY_F1 = 59   # F1 key code (Linux input event)
-TEST_PLAY_DURATION = 60  # seconds - 1 minute per folder
-TEST_PAUSE_DURATION = 30  # seconds - pause between folders
 

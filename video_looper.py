@@ -14,31 +14,27 @@ import select
 import termios
 import tty
 import fcntl
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import signal
-import json
 from time_sync import TimeSyncManager
 from projector_controller import ProjectorController
 from hdmi_controller import HDMIController
 from usb_sync import USBSync
 from constants import (
-    DEFAULT_VIDEOS_PATH, DEFAULT_LOG_FILE, VIDEO_EXTENSIONS,
+    DEFAULT_VIDEOS_PATH, VIDEO_EXTENSIONS,
     PROJECTOR_CONFIG_FILES, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT,
     CHECK_INTERVAL, HDMI_WAKE_DELAY, TIME_ENTRY_LOCK_FILE,
     TIME_SET_REQUEST_FILE, TIME_SET_RESULT_FILE, TIME_SET_TIMEOUT
 )
 
 class VideoLooper:
-    def __init__(self, videos_path=None, log_file=None):
+    def __init__(self, videos_path=None):
         # Use fixed paths for looper user
         if videos_path is None:
             videos_path = DEFAULT_VIDEOS_PATH
-        if log_file is None:
-            log_file = DEFAULT_LOG_FILE
             
         self.videos_path = Path(videos_path)
-        self.log_file = log_file
         self.current_process = None
         self.current_folder = None
         self.running = True
@@ -47,16 +43,16 @@ class VideoLooper:
         self.setup_logging()
         
         # Initialize time synchronization
-        self.time_sync = TimeSyncManager(log_file)
+        self.time_sync = TimeSyncManager()
         
         # Initialize projector controller
-        self.projector = ProjectorController(log_file)
+        self.projector = ProjectorController()
         
         # Initialize HDMI controller
-        self.hdmi = HDMIController(log_file)
+        self.hdmi = HDMIController()
         
         # Initialize USB sync
-        self.usb_sync = USBSync(str(self.videos_path), log_file)
+        self.usb_sync = USBSync(str(self.videos_path))
         
         # Signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -77,7 +73,6 @@ class VideoLooper:
         """Handle shutdown signals"""
         self.running = False
         self.stop_video(standby_hdmi=True)
-        self.time_sync.stop_background_sync()
         self.projector.disconnect()
         sys.exit(0)
     
@@ -716,20 +711,6 @@ class VideoLooper:
             self.logger.error(f"Error in manual time setting: {e}")
             self.show_message(f"Error: {str(e)}", 3)
     
-    def handle_ntp_sync(self):
-        """Handle NTP sync"""
-        try:
-            self.show_message("Syncing RTC with NTP...", 2)
-            
-            if self.time_sync.sync_rtc_with_ntp():
-                self.show_message("RTC synced with NTP successfully!", 3)
-            else:
-                self.show_message("Failed to sync with NTP. Check internet connection.", 5)
-                
-        except Exception as e:
-            self.logger.error(f"Error in NTP sync: {e}")
-            self.show_message(f"Error: {str(e)}", 3)
-    
     def show_message(self, message, duration=3):
         """Show a message on screen for specified duration"""
         try:
@@ -1024,10 +1005,8 @@ class VideoLooper:
         except Exception:
             pass
         
-        # Sync time - uses RTC by default, automatically falls back to NTP if RTC unavailable
-        # Warning will be shown automatically if neither RTC nor NTP is available
+        # Load the system time from the RTC
         self.time_sync.sync_time()
-        self.time_sync.start_background_sync()
         
         current_folder = None
         time_entry_held = False
@@ -1104,7 +1083,6 @@ class VideoLooper:
                 time.sleep(60)
         
         self.stop_video(standby_hdmi=True)
-        self.time_sync.stop_background_sync()
 
 def main():
     """Main entry point"""
@@ -1113,8 +1091,6 @@ def main():
     parser = argparse.ArgumentParser(description='Raspberry Pi Video Looper')
     parser.add_argument('--videos-path', default=None,
                        help='Path to videos directory (default: /home/looper/videos)')
-    parser.add_argument('--log-file', default='/var/log/video_looper.log',
-                       help='Log file path (default: /var/log/video_looper.log)')
     parser.add_argument('--test', action='store_true',
                        help='Test mode - show what would be played without starting VLC')
     parser.add_argument('--time-status', action='store_true',
@@ -1140,7 +1116,7 @@ def main():
     
     args = parser.parse_args()
     
-    looper = VideoLooper(args.videos_path, args.log_file)
+    looper = VideoLooper(args.videos_path)
     
     if args.test:
         # Test mode - just show what would be active

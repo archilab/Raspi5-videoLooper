@@ -147,7 +147,6 @@ sudo apt install -y \
     vlc \
     python3 \
     python3-pip \
-    python3-venv \
     git \
     ffmpeg \
     python3-requests \
@@ -240,7 +239,6 @@ sudo cp -f projector_controller.py "$INSTALL_DIR/"
 sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
 sudo cp -f constants.py "$INSTALL_DIR/"
-sudo cp -f config.conf "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
@@ -248,21 +246,7 @@ sudo chmod +x "$INSTALL_DIR/hdmi_controller.py"
 sudo chmod +x "$INSTALL_DIR/usb_sync.py"
 sudo chmod +x "$INSTALL_DIR/constants.py"
 
-echo -e "${GREEN}Step 6: Setting up Python environment...${NC}"
-# Create Python virtual environment as looper user
-sudo -u looper bash -c "cd '$INSTALL_DIR' && python3 -m venv venv"
-
-# Check if virtual environment was created successfully
-if [ -f "$INSTALL_DIR/venv/bin/activate" ]; then
-    echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
-    # Use the virtual environment's pip directly instead of sourcing
-    sudo -u looper bash -c "cd '$INSTALL_DIR' && ./venv/bin/pip install --upgrade pip"
-else
-    echo -e "${YELLOW}⚠ Virtual environment creation failed, using system pip${NC}"
-    pip3 install --upgrade pip
-fi
-
-echo -e "${GREEN}Step 7: Configuring RTC-only time synchronization (NTP disabled)...${NC}"
+echo -e "${GREEN}Step 6: Configuring RTC-only time synchronization (NTP disabled)...${NC}"
 
 # Disable systemd-timesyncd (NTP)
 echo -e "${GREEN}Disabling NTP (systemd-timesyncd)...${NC}"
@@ -305,7 +289,7 @@ echo -e "${GREEN}Configuring system for RTC-only mode...${NC}"
 
 echo -e "${GREEN}✓ RTC-only time synchronization configured${NC}"
 
-echo -e "${GREEN}Step 8: Configuring systemd service...${NC}"
+echo -e "${GREEN}Step 7: Configuring systemd service...${NC}"
 
 # Check if service is already running and stop it before updating
 SERVICE_WAS_RUNNING=false
@@ -378,15 +362,10 @@ else
     echo -e "${YELLOW}Check logs with: sudo journalctl -u video-looper -n 50${NC}"
 fi
 
-echo -e "${GREEN}Step 9: Setting up permissions...${NC}"
+echo -e "${GREEN}Step 8: Setting up permissions...${NC}"
 # Ensure looper user owns the directories
 sudo chown -R looper:looper "$INSTALL_DIR"
 sudo chown -R looper:looper "$VIDEOS_DIR"
-
-# Create log directory if it doesn't exist
-sudo mkdir -p /var/log
-sudo touch /var/log/video_looper.log
-sudo chown looper:looper /var/log/video_looper.log
 
 # Ensure XDG_RUNTIME_DIR exists for looper user (required for systemd user services)
 LOOPER_USER_ID=$(id -u looper 2>/dev/null || echo "1000")
@@ -398,7 +377,7 @@ if [ ! -d "/run/user/$LOOPER_USER_ID" ]; then
     echo -e "${GREEN}✓ Runtime directory created${NC}"
 fi
 
-echo -e "${GREEN}Step 10: Testing installation...${NC}"
+echo -e "${GREEN}Step 9: Testing installation...${NC}"
 # Test the script as looper user
 sudo -u looper bash -c "cd '$INSTALL_DIR' && python3 video_looper.py --test"
 
@@ -409,7 +388,7 @@ else
     exit 1
 fi
 
-echo -e "${GREEN}Step 11: Creating example folder structure...${NC}"
+echo -e "${GREEN}Step 10: Creating example folder structure...${NC}"
 # Create example folders with different schedules
 mkdir -p "$VIDEOS_DIR/2024-01-01_to_2024-01-31_0900_to_1800"
 mkdir -p "$VIDEOS_DIR/2024-02-01_to_2024-02-29_0800_to_2000"

@@ -26,7 +26,7 @@ for arg in "$@"; do
 done
 
 FILES=(constants.py hdmi_controller.py projector_controller.py time_sync.py usb_sync.py
-       video_looper.py config.conf video-looper.service rtc-time-restore.service
+       video_looper.py video-looper.service rtc-time-restore.service
        99-looper-rtc.rules)
 
 # ConnectionAttempts: the Pi's Wi-Fi sometimes answers "No route to host" on the first try.

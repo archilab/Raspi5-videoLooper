@@ -16,7 +16,7 @@ from constants import (
 )
 
 class ProjectorController:
-    def __init__(self, log_file="/var/log/video_looper.log"):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.serial_connection = None
         self.is_connected = False

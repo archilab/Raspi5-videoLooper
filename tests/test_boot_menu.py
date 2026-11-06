@@ -144,6 +144,14 @@ class Screens(MenuTestCase):
         self.assertIn('clip.mp4 (0.0 MB)', self.screen())
 
 
+    def test_folder_list_shows_the_always_folder(self):
+        make_tree(self.tmp / 'videos', {'always': {'clip.mp4': 'x'}})
+        with mock.patch('time.sleep'), mock.patch('builtins.print'), \
+                mock.patch.object(self.menu, 'display_boot_menu', return_value=None):
+            self.menu.display_folder_info_on_screen()
+        self.assertIn('[1] always', self.screen())
+        self.assertIn('Schedule: Plays all the time', self.screen())
+
     def test_folder_list_shows_every_window(self):
         make_tree(self.tmp / 'videos', {'2026-02-01_to_2026-02-02_0500_to_0900_and_1600_to_2300': {'clip.mp4': ''}})
         with mock.patch('time.sleep'), mock.patch('builtins.print'), \

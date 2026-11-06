@@ -239,3 +239,47 @@ class FindingFolders(unittest.TestCase):
                                 'not-a-schedule': {'d.mp4': ''}, '2026-01-01_to_2026-01-02_0900_to_1800': {'x.txt': ''}})
         names = [folder.name for folder, _ in scheduler.get_all_valid_folders(self.videos)]
         self.assertEqual(names, [october, NOVEMBER, december])
+
+
+class AlwaysFolder(unittest.TestCase):
+    NOW = datetime(2026, 11, 5, 12, 0)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.videos = Path(tmp.name) / 'videos'
+
+    def test_active_at_every_moment(self):
+        for now in (datetime(2026, 11, 5, 23, 59, 59), datetime(2026, 11, 6, 0, 0), datetime(2099, 12, 31, 12, 0)):
+            self.assertTrue(scheduler.is_folder_active('always', now))
+
+    def test_only_the_exact_name_counts(self):
+        for name in ('Always', 'always2', '.always', 'always_'):
+            self.assertFalse(scheduler.is_folder_active(name, self.NOW), name)
+
+    def test_is_not_a_schedule_name(self):
+        self.assertIsNone(scheduler.parse_folder_name('always'))
+
+    def test_plays_when_alone(self):
+        make_tree(self.videos, {'always': {'b.mp4': '', 'a.mp4': ''}})
+        folder, files = scheduler.find_active_folder(self.videos, self.NOW)
+        self.assertEqual(folder.name, 'always')
+        self.assertEqual([f.name for f in files], ['a.mp4', 'b.mp4'])
+
+    def test_needs_a_video(self):
+        make_tree(self.videos, {'always': {'projector.txt': ''}})
+        self.assertIsNone(scheduler.find_active_folder(self.videos, self.NOW))
+        self.assertEqual(scheduler.get_all_valid_folders(self.videos), [])
+
+    def test_an_active_schedule_plays_first(self):
+        make_tree(self.videos, {'always': {'a.mp4': ''}, NOVEMBER: {'b.mp4': ''}})
+        self.assertEqual(scheduler.find_active_folder(self.videos, self.NOW)[0].name, NOVEMBER)
+
+    def test_plays_when_no_schedule_is_active(self):
+        make_tree(self.videos, {'always': {'a.mp4': ''}, '2026-12-01_to_2026-12-31_0900_to_1800': {'b.mp4': ''}})
+        self.assertEqual(scheduler.find_active_folder(self.videos, self.NOW)[0].name, 'always')
+
+    def test_listed_first_with_the_folders(self):
+        make_tree(self.videos, {NOVEMBER: {'b.mp4': ''}, 'always': {'a.mp4': ''}})
+        names = [folder.name for folder, _ in scheduler.get_all_valid_folders(self.videos)]
+        self.assertEqual(names, ['always', NOVEMBER])

@@ -8,15 +8,29 @@ Examples: 2024-01-01_to_2024-01-31_0900_to_1800
 If a window's end time is before its start time it runs overnight. It starts on each
 date in the range, so the last night continues into the morning after the end date:
 2024-01-01_to_2024-01-03_2200_to_0600 plays from 22:00 on Jan 1 until 06:00 on Jan 4.
+
+A local folder called "always" plays all the time, unless a schedule is active. The USB
+sync creates it from videos at the top level of a drive that has no schedule folders.
 """
 
 import logging
 import re
-from datetime import datetime, timedelta
-from constants import FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT, VIDEO_EXTENSIONS
+from datetime import date, datetime, timedelta
+from constants import ALWAYS_FOLDER, FOLDER_NAME_PATTERN, DATE_FORMAT, TIME_FORMAT, VIDEO_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 _warned_names = set()
+
+
+def is_always_folder(folder_name):
+    """Check if this is the reserved folder that plays all the time"""
+    return folder_name == ALWAYS_FOLDER
+
+
+def _start_date(folder_name):
+    """When a folder starts. The always folder sorts before every date."""
+    schedule = parse_folder_name(folder_name)
+    return schedule['start_date'] if schedule else date.min
 
 
 def parse_folder_name(folder_name):
@@ -71,6 +85,9 @@ def _in_window(window, schedule, now):
 
 def is_folder_active(folder_name, now=None):
     """Check if a folder should be playing at a given time (default: now)"""
+    if is_always_folder(folder_name):
+        return True
+
     schedule = parse_folder_name(folder_name)
     if not schedule:
         return False
@@ -120,8 +137,9 @@ def find_active_folder(videos_path, now=None):
     if not active_folders:
         return None
 
-    # If multiple folders are active, use the one with the most recent start date
-    active_folders.sort(key=lambda x: parse_folder_name(x[0].name)['start_date'], reverse=True)
+    # If multiple folders are active, use the one with the most recent start date,
+    # which puts the always folder last
+    active_folders.sort(key=lambda x: _start_date(x[0].name), reverse=True)
 
     return active_folders[0]
 
@@ -139,12 +157,12 @@ def get_all_valid_folders(videos_path):
 
     for folder_path in videos_path.iterdir():
         if (folder_path.is_dir() and not folder_path.name.startswith('.')
-                and parse_folder_name(folder_path.name)):
+                and (is_always_folder(folder_path.name) or parse_folder_name(folder_path.name))):
             video_files = get_video_files(folder_path)
             if video_files:
                 valid_folders.append((folder_path, video_files))
 
     # Sort by start date (ascending - chronological order)
-    valid_folders.sort(key=lambda x: parse_folder_name(x[0].name)['start_date'])
+    valid_folders.sort(key=lambda x: _start_date(x[0].name))
 
     return valid_folders

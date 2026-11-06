@@ -28,8 +28,12 @@ VIDEO_EXTENSIONS: FrozenSet[str] = frozenset({
 
 # Projector configuration files
 PROJECTOR_CONFIG_FILES = ['projector.txt', 'projector.conf', 'config.txt']
+# At the top level of a USB drive, without config.txt, whose name is too generic to trust
+USB_ROOT_PROJECTOR_FILES = ['projector.txt', 'projector.conf']
 
 # Folder naming
+# Reserved local folder that plays all the time, holding the videos from the top level of a USB drive
+ALWAYS_FOLDER = 'always'
 # Start date, end date, then one or more time windows joined by _and_
 FOLDER_NAME_PATTERN = r'(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(\d{4}_to_\d{4}(?:_and_\d{4}_to_\d{4})*)'
 DATE_FORMAT = '%Y-%m-%d'

@@ -609,3 +609,22 @@ class RunningAndStatus(NextcloudTestCase):
         self.assertIn('share link', output)
         self.assertNotIn('secrettoken', output)
         self.assertNotIn('topsecret', output)
+
+
+class AlwaysFolder(NextcloudTestCase):
+    def test_replaced_once_the_server_has_valid_folders(self):
+        self.add_local('always', 'loop.mp4', 'loop')
+        self.cloud.add(FA, 'a.mp4', 'video')
+        self.assertTrue(self.sync()[0])
+        self.assertEqual(sorted(self.local_tree()), [FA])
+
+    def test_kept_while_the_server_has_no_valid_folders(self):
+        self.add_local('always', 'loop.mp4', 'loop')
+        ok, message = self.sync()
+        self.assertTrue(ok)
+        self.assertIn('nothing changed', message)
+        self.assertEqual(self.local_tree(), {'always': {'loop.mp4': 'loop'}})
+
+    def test_an_always_folder_on_the_server_is_ignored(self):
+        self.cloud.add('always', 'a.mp4', 'video')
+        self.assertEqual(self.client().list_folders(), {})

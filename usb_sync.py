@@ -15,7 +15,8 @@ import scheduler
 from console import show_on_console
 from sync_plan import make_plan
 from constants import (
-    VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
+    ALWAYS_FOLDER, VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, USB_MOUNT_POINTS, USB_ROOT_PROJECTOR_FILES,
+    DEFAULT_VIDEOS_PATH
 )
 
 class USBSync:
@@ -193,7 +194,15 @@ class USBSync:
             self.logger.warning(f"Could not access {root_path}: {e}")
         
         return valid_folders
-    
+
+    def get_local_folders(self):
+        """The folders on this Pi that a sync manages: the schedule folders and the always folder"""
+        folders = self.get_valid_folders(self.local_videos_path)
+        always = self.local_videos_path / ALWAYS_FOLDER
+        if always.is_dir() and self.get_video_files_set(always):
+            folders[ALWAYS_FOLDER] = always
+        return folders
+
     def get_folder_files_dict(self, folder_path):
         """
         Get a dictionary of files in a folder (name -> Path)
@@ -260,7 +269,11 @@ class USBSync:
             temp_file.unlink(missing_ok=True)
             raise
 
-    def sync_folder(self, usb_folder_path, local_folder_path):
+    def _wanted_from_root(self, filename):
+        """Only these leave the top level of a drive, which may hold anything, even nextcloud.txt's password"""
+        return Path(filename).suffix.lower() in VIDEO_EXTENSIONS or filename in USB_ROOT_PROJECTOR_FILES
+
+    def sync_folder(self, usb_folder_path, local_folder_path, wanted=None):
         """
         Sync a folder from USB to local directory
         Copies missing files, updates changed ones, and removes videos and
@@ -268,6 +281,7 @@ class USBSync:
         Args:
             usb_folder_path: Source folder on USB
             local_folder_path: Destination folder (local)
+            wanted: Check for which file names to copy (default: all of them)
         Returns:
             tuple: (copied_count, updated_count, errors)
         """
@@ -285,6 +299,8 @@ class USBSync:
             return (copied_count, updated_count, errors)
 
         usb_files = self.get_folder_files_dict(usb_folder_path)
+        if wanted:
+            usb_files = {name: path for name, path in usb_files.items() if wanted(name)}
         local_files = self.get_folder_files_dict(local_folder_path)
 
         for filename, usb_file in usb_files.items():
@@ -321,12 +337,19 @@ class USBSync:
         """
         Work out what syncing from a USB drive would do, without changing anything.
         Both the real sync and its preview use this, so they can't disagree.
+        A drive with no schedule folders but videos at its top level becomes the always folder.
         Returns:
             dict: see sync_plan.make_plan
         """
-        def videos(root):
-            return {name: self.get_video_files_set(path) for name, path in self.get_valid_folders(root).items()}
-        return make_plan(videos(usb_root_path), videos(self.local_videos_path))
+        def videos(folders):
+            return {name: self.get_video_files_set(path) for name, path in folders.items()}
+
+        source = videos(self.get_valid_folders(usb_root_path))
+        if not source:
+            root_videos = self.get_video_files_set(usb_root_path)
+            if root_videos:
+                source = {ALWAYS_FOLDER: root_videos}
+        return make_plan(source, videos(self.get_local_folders()))
 
     def sync_usb_to_local(self, usb_root_path):
         """
@@ -348,9 +371,15 @@ class USBSync:
             self.logger.error(f"Failed to create local videos directory: {e}")
             return False
 
-        self.display_message_on_screen(
-            f"USB Sync Started\nCopying {folder_count} folder(s) from USB drive..."
-        )
+        new_names = plan['update'] + plan['copy'] + [new_name for _, new_name in plan['rename']]
+        if ALWAYS_FOLDER in new_names:
+            self.display_message_on_screen(
+                "USB Sync Started\nCopying the videos at the top level of the USB drive, to play all the time..."
+            )
+        else:
+            self.display_message_on_screen(
+                f"USB Sync Started\nCopying {folder_count} folder(s) from USB drive..."
+            )
 
         total_copied = 0
         total_updated = 0
@@ -366,8 +395,12 @@ class USBSync:
                 total_errors.append(f"Failed to rename folder {old_name}: {e}")
 
         # Syncing also picks up any differences in renamed folders, and copies them if the rename failed
-        for name in plan['update'] + plan['copy'] + [new_name for _, new_name in plan['rename']]:
-            copied, updated, errors = self.sync_folder(usb_root_path / name, self.local_videos_path / name)
+        for name in new_names:
+            if name == ALWAYS_FOLDER:
+                copied, updated, errors = self.sync_folder(
+                    usb_root_path, self.local_videos_path / name, wanted=self._wanted_from_root)
+            else:
+                copied, updated, errors = self.sync_folder(usb_root_path / name, self.local_videos_path / name)
             total_copied += copied
             total_updated += updated
             total_errors.extend(errors)
@@ -407,9 +440,12 @@ class USBSync:
         return not total_errors
     
     def find_sync_source(self, usb_mounts):
-        """Pick the USB drive to sync from: the first one with valid video folders"""
+        """Pick the USB drive to sync from: the first with valid video folders, else with videos at its top level"""
         for usb_mount in usb_mounts:
             if self.get_valid_folders(usb_mount):
+                return usb_mount
+        for usb_mount in usb_mounts:
+            if self.get_video_files_set(usb_mount):
                 return usb_mount
         return None
 

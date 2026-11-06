@@ -63,7 +63,9 @@ class BootMenu:
                     
                     lines.append(f"[{idx}] {folder_name}")
                     
-                    if schedule:
+                    if scheduler.is_always_folder(folder_name):
+                        lines.append("     Schedule: Plays all the time")
+                    elif schedule:
                         start_date = schedule['start_date'].strftime('%Y-%m-%d')
                         end_date = schedule['end_date'].strftime('%Y-%m-%d')
                         windows = " and ".join(

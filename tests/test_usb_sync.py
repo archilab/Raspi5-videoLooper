@@ -226,3 +226,92 @@ class SyncFolder(UsbSyncTestCase):
         sync.sync_folder(self.usb / FA, self.local / FA)
         chowned = [Path(call.args[0]).name for call in os.chown.call_args_list]
         self.assertEqual(chowned, ['.a.mp4.tmp'])
+
+
+class RootVideos(UsbSyncTestCase):
+    """A drive with no schedule folders, but videos at its top level, becomes the always folder"""
+
+    def setup_root_drive(self, local, root_files=None, usb=None):
+        sync = self.setup_drives(usb or {}, local)
+        for name, content in (root_files or {'a.mp4': 'a', 'b.MKV': 'b'}).items():
+            (self.usb / name).write_text(content)
+        return sync
+
+    def boot(self, sync):
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            return sync.sync_on_boot()
+
+    def test_videos_are_copied_to_the_always_folder(self):
+        sync = self.setup_root_drive({})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(read_tree(self.local), {'always': {'a.mp4': 'a', 'b.MKV': 'b'}})
+
+    def test_only_videos_and_projector_settings_leave_the_top_level(self):
+        sync = self.setup_root_drive({}, {'a.mp4': 'a', '._a.mp4': 'mac', 'nextcloud.txt': 'enabled=false\n',
+                                          'report.pdf': 'x', 'config.txt': 'x', 'projector.txt': 'p'})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(read_tree(self.local), {'always': {'a.mp4': 'a', 'projector.txt': 'p'}})
+
+    def test_unrelated_subfolders_do_not_count(self):
+        sync = self.setup_root_drive({}, usb={'Photos': {'p.mp4': 'not this'}, 'System Volume Information': {'x': ''}})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)['always']), ['a.mp4', 'b.MKV'])
+
+    def test_schedule_folders_on_the_pi_are_replaced(self):
+        sync = self.setup_root_drive({FA: VIDEO, FB: {'other.mp4': 'x'}})
+        self.assertEqual(sync.plan_sync(self.usb), {'update': [], 'copy': ['always'], 'rename': [], 'delete': [FA, FB]})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), ['always'])
+
+    def test_failed_copy_keeps_the_schedule_folders(self):
+        sync = self.setup_root_drive({FA: VIDEO})
+        with mock.patch.object(usb_sync.shutil, 'copy2', side_effect=OSError(28, 'No space left on device')), \
+                self.assertLogs('usb_sync', logging.WARNING):
+            self.assertFalse(sync.sync_usb_to_local(self.usb))
+        self.assertIn(FA, read_tree(self.local))
+
+    def test_schedule_folders_on_the_drive_win(self):
+        sync = self.setup_root_drive({}, usb={FA: VIDEO})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_schedule_folders_replace_the_always_folder(self):
+        sync = self.setup_drives({FA: VIDEO}, {'always': {'a.mp4': 'a'}})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_same_videos_are_renamed_not_copied(self):
+        sync = self.setup_root_drive({FA: {'a.mp4': 'a', 'projector.txt': 'gone'}}, {'a.mp4': 'a'})
+        self.assertEqual(sync.plan_sync(self.usb)['rename'], [(FA, 'always')])
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(read_tree(self.local), {'always': {'a.mp4': 'a'}})
+
+    def test_second_sync_updates_and_removes_videos(self):
+        sync = self.setup_root_drive({'always': {'a.mp4': 'old', 'gone.mp4': 'x'}}, {'a.mp4': 'newer'})
+        self.assertEqual(sync.plan_sync(self.usb), {'update': ['always'], 'copy': [], 'rename': [], 'delete': []})
+        self.assertTrue(self.boot(sync))
+        self.assertEqual(read_tree(self.local), {'always': {'a.mp4': 'newer'}})
+
+    def test_an_always_folder_on_the_drive_is_not_a_source(self):
+        sync = self.setup_drives({'always': VIDEO}, {FA: VIDEO})
+        self.assertFalse(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_top_level_without_videos_changes_nothing(self):
+        sync = self.setup_root_drive({FA: VIDEO}, {'report.pdf': 'x', '._a.mp4': 'mac'})
+        self.assertFalse(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_a_drive_with_schedule_folders_is_chosen_first(self):
+        sync = self.setup_drives({FA: VIDEO}, {})
+        loose = self.base / 'loose'
+        loose.mkdir()
+        (loose / 'a.mp4').write_text('a')
+        self.assertEqual(sync.find_sync_source([loose, self.usb]), self.usb)
+        self.assertEqual(sync.find_sync_source([loose]), loose)
+
+    def test_nextcloud_keeps_usb_video_sync_off(self):
+        sync = self.setup_root_drive({FA: VIDEO})
+        nextcloud_sync.save_config(nextcloud_sync.make_config({'share_url': 'https://cloud.test/s/abc'}))
+        self.assertFalse(self.boot(sync))
+        self.assertEqual(sorted(read_tree(self.local)), [FA])

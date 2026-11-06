@@ -4,6 +4,7 @@ Unattended video playback for a Raspberry Pi 5 driving a screen or projector, fo
 
 - Loops videos silently and fullscreen with VLC, starting on boot
 - Schedules by date and daily hours, with several time windows a day and overnight windows
+- Or plays videos from the top level of a USB drive in an endless loop, with no schedule to set up
 - Updates content from a USB drive when the service starts, or regularly from a Nextcloud folder
 - Keeps time with the Pi's battery-backed real-time clock (RTC), with optional NTP when there's internet
 - Switches a projector on and off over USB serial, with no setup for known brands
@@ -72,7 +73,25 @@ Put your schedule folders in the top level of the drive, plug it in, and restart
 
 **While Nextcloud is on, USB video sync is off**, and the screen says so.
 
-**The USB drive is the source of truth.** Local folders that aren't on the drive are removed, so the drive must hold everything you want to keep playing. A drive with no valid folders changes nothing.
+**The USB drive is the source of truth.** Local folders that aren't on the drive are removed, so the drive must hold everything you want to keep playing. A drive with no valid folders and no videos at its top level changes nothing.
+
+### Playing videos without a schedule
+
+Put one or more videos in the top level of a drive that has no schedule folders, and they loop endlessly in filename order. Other subfolders don't count, so `Photos` or `System Volume Information` make no difference.
+
+| On the drive | Result |
+|---|---|
+| Schedule folders, with or without videos at the top level | The schedule folders are synced, and top level videos are ignored |
+| Videos at the top level only | They play all the time |
+| Neither | Nothing changes on the Pi |
+
+- **This replaces the schedule folders on the Pi.** **Any drive with loose videos and no schedule folders does this**, so check first with `--usb-sync-test`. They're only removed after the videos have copied without errors, and getting them back needs a drive that holds them.
+- **Where they go:** the videos are copied to `/home/looper/videos/always/`, so you can remove the drive afterwards. A drive with schedule folders replaces this folder at the next sync, or Nextcloud once it finds valid folders. The name `always` is reserved on the Pi, and a folder with that name on a drive or on Nextcloud is ignored.
+- **What's copied:** only videos, `projector.txt` and `projector.conf`. Everything else at the top level stays on the drive, including `nextcloud.txt` and a generic `config.txt`.
+- **If a schedule folder is also on the Pi**, for example after a failed sync, it plays during its time windows, and the looping videos play the rest of the time.
+- **While this plays:** the HDMI signal and a connected projector stay on, so projector lamp hours keep adding up. The clock doesn't matter.
+
+### What a sync does
 
 To see what a sync would do, without changing anything:
 
@@ -82,7 +101,7 @@ sudo -u looper python3 /home/looper/video_looper/video_looper.py --usb-sync-test
 
 - **Same name:** new and changed files are copied, and videos and projector settings no longer on the drive are removed from that folder. Other files are left alone.
 - **New name, same video filenames:** if a local folder that's leaving has the same video filenames, it's renamed instead of copied, so changing a schedule is quick.
-- **Several drives:** the first one with valid folders is used.
+- **Several drives:** the first one with valid folders is used, otherwise the first with videos at its top level.
 - **Interruptions:** each file is copied to a hidden temporary name and then renamed, so an interrupted copy can't damage an existing video.
 - **Errors:** if a copy fails, for example on a full disk, nothing old is deleted. The screen shows a summary and the details go to the log.
 
@@ -313,7 +332,8 @@ sudo journalctl -u video-looper -f
 | Nothing plays | Run `--test`. Check the folder name, that it contains a video, and that the Pi's `date` is correct |
 | Wrong time after power loss | The RTC battery, under Time above |
 | New folders didn't arrive | The sync only runs at service start. Check with `--usb-sync-test` and `mount \| grep media` |
-| Local folder disappeared | It wasn't on the USB drive when the service started |
+| Local folder disappeared | It wasn't on the USB drive when the service started, or the drive had only videos at its top level |
+| Videos at the top level of the drive don't play | The drive also has a valid schedule folder, which takes priority. Check with `--usb-sync-test` |
 | Display stays on after hours | Check whether the signal is really `Off`, under Display control above. If it is, check the display's no-signal or power-saving settings |
 | Screen is dark when it should show something | The signal is off because nothing is scheduled. Run `--test` and see Display control above |
 | Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual. A settings file replaces the automatic commands |

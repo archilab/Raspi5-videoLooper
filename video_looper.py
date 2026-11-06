@@ -303,9 +303,13 @@ def main():
             print(f"    Valid video folders: {len(valid_folders)}")
             for folder_name in valid_folders.keys():
                 print(f"      - {folder_name}")
+            root_videos = looper.usb_sync.get_video_files_set(mount)
+            if root_videos:
+                effect = "ignored, because it has valid folders" if valid_folders else "these would play all the time"
+                print(f"    Videos at the top level: {len(root_videos)} ({effect})")
 
         print(f"\nLocal video folders in {looper.videos_path}:")
-        local_folders = looper.usb_sync.get_valid_folders(looper.videos_path)
+        local_folders = looper.usb_sync.get_local_folders()
         print(f"  Found {len(local_folders)} valid folder(s):")
         for folder_name in local_folders.keys():
             print(f"    - {folder_name}")
@@ -343,7 +347,7 @@ def main():
                 if success:
                     print("✓ USB sync completed successfully")
                 else:
-                    print("✗ No USB drives with valid video folders found")
+                    print("✗ No USB drives with valid video folders or top level videos found")
         except Exception as e:
             print(f"✗ USB sync failed: {e}")
         return

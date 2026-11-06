@@ -11,6 +11,15 @@ TIME_ENTRY_LOCK_FILE = "/dev/shm/video_looper_time_entry.lock"
 TIME_SET_REQUEST_FILE = "/dev/shm/video_looper_time_request"
 TIME_SET_RESULT_FILE = "/dev/shm/video_looper_time_result"
 TIME_SET_TIMEOUT = 20  # seconds the menu waits for the service to answer
+# Nextcloud settings hold a password, so they're only readable by looper
+NEXTCLOUD_CONFIG_FILE = "/home/looper/nextcloud.conf"
+NEXTCLOUD_USB_FILE = "nextcloud.txt"  # Settings on a USB drive, imported when the service starts
+NEXTCLOUD_STATUS_FILE = "/dev/shm/video_looper_nextcloud_status"
+NEXTCLOUD_TRIGGER_FILE = "/dev/shm/video_looper_nextcloud_trigger"
+NEXTCLOUD_LOCK_FILE = "/dev/shm/video_looper_nextcloud.lock"
+NEXTCLOUD_DEFAULT_INTERVAL = 15  # minutes between checks
+NEXTCLOUD_FIRST_CHECK_DELAY = 30  # seconds after the service starts
+NEXTCLOUD_FREE_SPACE_MARGIN = 200 * 1024 * 1024  # bytes to always leave free
 
 # Video formats
 VIDEO_EXTENSIONS: FrozenSet[str] = frozenset({

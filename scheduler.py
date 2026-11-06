@@ -88,6 +88,18 @@ def get_video_files(folder_path):
     return sorted(video_files)
 
 
+def video_signature(video_files):
+    """Something that changes if a folder's videos change, so the player can restart"""
+    signature = []
+    for video in video_files:
+        try:
+            stat = video.stat()
+            signature.append((str(video), stat.st_size, stat.st_mtime))
+        except OSError:
+            signature.append((str(video), None, None))
+    return signature
+
+
 def find_active_folder(videos_path, now=None):
     """
     Find the folder that should be playing at a given time (default: now)

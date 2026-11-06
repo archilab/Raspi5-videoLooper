@@ -15,7 +15,7 @@ MODULES = sorted(p.name for p in ROOT.glob('*.py'))
 
 class Packaging(unittest.TestCase):
     def test_every_local_import_exists(self):
-        stdlib = set(sys.stdlib_module_names) | {'serial'}
+        stdlib = set(sys.stdlib_module_names) | {'serial', 'requests'}
         for module in MODULES:
             tree = ast.parse((ROOT / module).read_text())
             for node in ast.walk(tree):
@@ -43,6 +43,18 @@ class Packaging(unittest.TestCase):
     def test_service_grants_access_to_switch_the_hdmi_signal(self):
         unit = (ROOT / 'video-looper.service').read_text()
         self.assertIn('chmod g+w /sys/class/graphics/fb0/blank', unit)
+
+    def test_install_and_deploy_ship_the_nextcloud_service(self):
+        name = 'video-looper-nextcloud'
+        self.assertIn(f'{name}.service', (ROOT / 'install.sh').read_text())
+        self.assertIn(f'{name}.service', (ROOT / 'deploy.sh').read_text())
+        self.assertIn(f'systemctl restart {name}', (ROOT / 'deploy.sh').read_text())
+
+    def test_nextcloud_service_has_low_priority_and_no_special_permissions(self):
+        unit = (ROOT / 'video-looper-nextcloud.service').read_text()
+        self.assertIn('User=looper', unit)
+        self.assertIn('IOSchedulingClass=idle', unit)
+        self.assertNotIn('Capabilit', unit)
 
     def test_install_and_deploy_ship_the_polkit_rule(self):
         name = '50-looper-network-time.rules'

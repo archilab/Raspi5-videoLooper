@@ -239,7 +239,7 @@ sudo cp -f hdmi_controller.py "$INSTALL_DIR/"
 sudo cp -f usb_sync.py "$INSTALL_DIR/"
 sudo cp -f constants.py "$INSTALL_DIR/"
 sudo cp -f console.py "$INSTALL_DIR/"
-sudo cp -f boot_menu.py network_setup.py player.py scheduler.py time_entry.py "$INSTALL_DIR/"
+sudo cp -f boot_menu.py network_setup.py nextcloud_sync.py player.py scheduler.py sync_plan.py time_entry.py "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/video_looper.py"
 sudo chmod +x "$INSTALL_DIR/time_sync.py"
 sudo chmod +x "$INSTALL_DIR/projector_controller.py"
@@ -326,6 +326,11 @@ else
     echo -e "${YELLOW}Warning: rtc-time-restore.service not found, skipping...${NC}"
 fi
 
+# Install the Nextcloud service, which stays idle until Nextcloud is set up
+sudo cp -f video-looper-nextcloud.service /etc/systemd/system/video-looper-nextcloud.service
+sudo systemctl daemon-reload
+sudo systemctl enable video-looper-nextcloud.service
+
 # Always reinstall the service file from the installation folder
 echo -e "${GREEN}Installing service file from installation folder...${NC}"
 sudo cp -f video-looper.service "$SERVICE_FILE"
@@ -356,6 +361,7 @@ sudo systemctl enable video-looper
 # Always start the service after enabling
 echo -e "${GREEN}Starting service...${NC}"
 sudo systemctl start video-looper
+sudo systemctl start video-looper-nextcloud
 
 # Wait a moment and check if it started successfully
 sleep 3

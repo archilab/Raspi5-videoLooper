@@ -12,8 +12,8 @@ import time_entry
 import video_looper
 from tests.helpers import FakeDisplay, FakeProcess, FakeProjector, make_hdmi
 
-FOLDER_A = (Path('/nonexistent/A'), ['a.mp4'])
-FOLDER_B = (Path('/nonexistent/B'), ['b.mp4'])
+FOLDER_A = (Path('/nonexistent/A'), [Path('a.mp4')])
+FOLDER_B = (Path('/nonexistent/B'), [Path('b.mp4')])
 
 
 class MainLoopTestCase(unittest.TestCase):
@@ -188,6 +188,32 @@ class DisplaySignal(MainLoopTestCase):
         self.assertEqual(self.display.sent, [])
 
 
+class UpdatedVideos(MainLoopTestCase):
+    def test_changed_files_restart_the_video(self):
+        self.active = FOLDER_A
+        signatures = iter([['one'], ['one'], ['two'], ['two']])
+        with mock.patch('scheduler.video_signature', side_effect=lambda files: next(signatures)):
+            self.run_passes(None, None, None)
+        self.assertEqual(len(self.vlc), 2)
+        self.assertFalse(self.vlc[0].alive)
+
+    def test_unchanged_files_keep_playing(self):
+        self.active = FOLDER_A
+        self.run_passes(None, None, None)
+        self.assertEqual(len(self.vlc), 1)
+
+    def test_projector_stays_on_when_videos_change(self):
+        folder = Path(self.tmp) / 'with-projector'
+        folder.mkdir()
+        (folder / 'projector.txt').write_text('enable_projector=true')
+        self.active = (folder, [Path('a.mp4')])
+        seen = []
+        signatures = iter([['one'], ['two'], ['two'], ['two']])
+        with mock.patch('scheduler.video_signature', side_effect=lambda files: next(signatures)):
+            self.run_passes(None, lambda: seen.append(list(self.looper.projector.calls)))
+        self.assertEqual(seen, [['connect', 'start']])
+
+
 class RtcUpdates(MainLoopTestCase):
     def test_updates_at_startup_then_every_interval(self):
         update = self.looper.time_sync.update_rtc_from_ntp
@@ -212,7 +238,7 @@ class ProjectorPower(MainLoopTestCase):
         self.folder = Path(self.tmp) / 'with-projector'
         self.folder.mkdir()
         (self.folder / 'projector.txt').write_text('enable_projector=true')
-        self.active = (self.folder, ['a.mp4'])
+        self.active = (self.folder, [Path('a.mp4')])
         self.calls = self.looper.projector.calls
 
     def test_stays_on_through_a_vlc_crash(self):

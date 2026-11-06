@@ -25,8 +25,8 @@ for arg in "$@"; do
     esac
 done
 
-FILES=(boot_menu.py console.py constants.py hdmi_controller.py network_setup.py player.py scheduler.py time_entry.py projector_controller.py time_sync.py usb_sync.py
-       video_looper.py video-looper.service rtc-time-restore.service
+FILES=(boot_menu.py console.py constants.py hdmi_controller.py network_setup.py nextcloud_sync.py player.py scheduler.py sync_plan.py time_entry.py projector_controller.py time_sync.py usb_sync.py
+       video_looper.py video-looper.service rtc-time-restore.service video-looper-nextcloud.service
        99-looper-rtc.rules 50-looper-network-time.rules)
 
 # ConnectionAttempts: the Pi's Wi-Fi sometimes answers "No route to host" on the first try.
@@ -106,6 +106,8 @@ if [ -n "$doomed" ] && [ "$allow_usb_delete" = 0 ]; then
 fi
 
 sudo -n systemctl restart video-looper
+sudo -n systemctl enable --quiet video-looper-nextcloud
+sudo -n systemctl restart video-looper-nextcloud
 sleep 5
 echo "Service: $(systemctl is-active video-looper)"
 sudo -n journalctl -u video-looper -n 8 --no-pager

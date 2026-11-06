@@ -4,7 +4,7 @@ Unattended video playback for a Raspberry Pi 5 driving a screen or projector, fo
 
 - Loops videos silently and fullscreen with VLC, starting on boot
 - Schedules by date and daily hours, with several time windows a day and overnight windows
-- Updates content from a USB drive when the service starts
+- Updates content from a USB drive when the service starts, or regularly from a Nextcloud folder
 - Keeps time with the Pi's battery-backed real-time clock (RTC), with optional NTP when there's internet
 - Switches a projector on and off over USB serial, with no setup for known brands
 - Switches the HDMI signal off outside scheduled hours, so most displays go to sleep
@@ -61,7 +61,7 @@ The script changes the whole system, so read it first on a Pi that has other use
 - If `looper` already exists and `admin` doesn't, creates `admin` with **passwordless sudo**
 - **Disables NTP**, so the system runs on the RTC alone until you switch it in the boot menu. Running the script again switches it back
 - Sets up USB automounting at `/media/usb1` to `/media/usb4`
-- Installs and starts the `video-looper` and `rtc-time-restore` services
+- Installs and starts the `video-looper`, `rtc-time-restore` and `video-looper-nextcloud` services. The last stays idle until Nextcloud is set up
 - Creates example folders dated 2024, containing empty placeholder videos, which you can delete
 
 `setup_examples.sh` creates more example folders, and `troubleshoot.sh` runs a read-only system check.
@@ -69,6 +69,8 @@ The script changes the whole system, so read it first on a Pi that has other use
 ## Updating videos from a USB drive
 
 Put your schedule folders in the top level of the drive, plug it in, and restart the service or reboot. The sync only runs when the service starts.
+
+**While Nextcloud is on, USB video sync is off**, and the screen says so.
 
 **The USB drive is the source of truth.** Local folders that aren't on the drive are removed, so the drive must hold everything you want to keep playing. A drive with no valid folders changes nothing.
 
@@ -84,6 +86,68 @@ sudo -u looper python3 /home/looper/video_looper/video_looper.py --usb-sync-test
 - **Interruptions:** each file is copied to a hidden temporary name and then renamed, so an interrupted copy can't damage an existing video.
 - **Errors:** if a copy fails, for example on a full disk, nothing old is deleted. The screen shows a summary and the details go to the log.
 
+## Updating videos from Nextcloud
+
+Instead of a USB drive, the Pi can follow a folder on a Nextcloud server. Put your schedule folders in it, and the Pi checks every 15 minutes by default. Checks only read names, sizes and dates, so videos are only downloaded when something changed.
+
+**Nextcloud becomes the source of truth.** Local folders that aren't on it are removed, so **deleting a folder on Nextcloud deletes it from the Pi at the next check**. USB video sync is off while this is on, because each would delete what the other added.
+
+### Connecting
+
+There are two ways to connect, and a read-only share link is the safer one, because it covers only that folder and can be revoked.
+
+- **Share link:** in Nextcloud, share the folder by public link, with or without a password.
+- **Account:** a username and an app password, created under Personal settings, Security. It reaches everything the account can, so use one with only the access it needs.
+
+### Setting it up
+
+**With the keyboard:** press `5` at the boot menu and enter the details. The Pi tests the connection and shows what it would download and remove, then asks you to confirm.
+
+**With a USB drive:** put a file called `nextcloud.txt` in the top level of the drive, and restart the service or reboot:
+
+```
+# With a share link
+share_url=https://cloud.example.com/s/abc123
+password=
+interval=15
+```
+
+```
+# Or with an account
+server=https://cloud.example.com
+username=player
+password=app-password-here
+folder=Videos/Looper
+interval=15
+```
+
+`interval` is in minutes, from 1 to 1440, and defaults to 15. The password line is optional for a share link. Add `enabled=false` to import the settings without turning sync on. **Importing turns sync on without asking**, and the settings are only imported again if the file changes, so turning Nextcloud off in the menu stays off.
+
+**Remove `nextcloud.txt` from the drive afterwards**, because it contains the password. The Pi keeps its copy in `/home/looper/nextcloud.conf`, which only `looper` can read.
+
+### What happens during a sync
+
+- **Playback continues:** downloads run in the background at low priority. When a playing folder's videos change, VLC restarts as soon as the next schedule check sees it, within 30 seconds, which interrupts the video briefly. The projector stays on.
+- **Network failures:** a failed check changes nothing, and it tries again at the next one. Interrupted downloads resume where they stopped.
+- **Partial content:** a new folder stays hidden until it's complete, and files in a folder are replaced together once all have arrived.
+- **Errors:** if anything fails, nothing old is removed. If there isn't enough disk space, nothing starts, and 200 MB is always left free.
+- **What's downloaded:** only videos and projector settings, directly inside valid schedule folders. Folders with no valid name or no video are ignored, and if Nextcloud has no valid folders at all, nothing changes.
+- **First sync:** a video with the same name and size is downloaded again if its date differs on Nextcloud.
+
+### Checking it
+
+The boot menu shows the state and last result. Press `5` for details, to turn it off or on, or to sync now. From a terminal:
+
+```bash
+sudo -u looper python3 /home/looper/video_looper/video_looper.py --nextcloud-status
+sudo -u looper python3 /home/looper/video_looper/video_looper.py --nextcloud-test
+sudo journalctl -u video-looper-nextcloud -f
+```
+
+`--nextcloud-test` connects and shows what a sync would do, without changing anything.
+
+HTTPS needs a roughly correct clock, so a badly wrong clock shows up as a connection failure. The NTP option under Time helps with this.
+
 ## Boot menu
 
 After each boot, the HDMI console shows the folder list for 10 seconds, then this menu for 20 seconds. Connect a USB keyboard to use it. The menu only appears at boot, so reboot to reach it again.
@@ -94,6 +158,7 @@ After each boot, the HDMI console shows the folder list for 10 seconds, then thi
 | `2` | Set the date and time |
 | `3` | Set Wi-Fi |
 | `4` | Choose the time source |
+| `5` | Set up Nextcloud, or see its status |
 | `Enter` | Continue, which also happens when the countdown ends |
 
 The service's video can start while the menu is on screen and cover it. Pressing a number still works: the video stops within a couple of seconds, and returns by itself when you're done.
@@ -213,6 +278,10 @@ Run these as `looper`, for example `sudo -u looper python3 /home/looper/video_lo
 | `--projector-test` | Check that the projector's serial port opens |
 | `--projector-start` | Send the power on command, or commands |
 | `--projector-stop` | Send the power off command, or commands |
+| `--nextcloud-status` | Show the Nextcloud settings and the last check |
+| `--nextcloud-test` | Connect and show what a sync would do |
+| `--nextcloud-sync` | Sync from Nextcloud now |
+| `--nextcloud-service` | Run the regular checks, as the background service does |
 | `--usb-sync-test` | Preview a USB sync |
 | `--usb-sync` | Sync now, and `--usb-path PATH` picks the drive. Stop the service first, since the sync can replace or remove what's playing |
 | `--display-folder-info` | Show the folder list and boot menu |
@@ -240,6 +309,8 @@ sudo journalctl -u video-looper -f
 | Projector does nothing | Run `--list-ports` and `--projector-test`, then check the commands and baud rate against the manual. A settings file replaces the automatic commands |
 | Projector stays off after a short gap or restart | It may have ignored the start while cooling down. Use longer gaps between time windows |
 | Service won't start | `sudo journalctl -u video-looper -n 50` |
+| Nextcloud isn't updating | Run `--nextcloud-test` and read `sudo journalctl -u video-looper-nextcloud -n 50` |
+| Local folder disappeared, with Nextcloud on | It wasn't in the Nextcloud folder at the last check |
 | Wi-Fi won't connect | Show the password with Tab to check the keyboard layout. `nmcli device wifi list` shows what the Pi can see |
 | Clock is wrong with NTP on | Check the Pi can reach the internet, and run `timedatectl status` |
 
@@ -247,7 +318,7 @@ Only warnings and errors are logged, to the system journal and not to a file, to
 
 ## How it works
 
-Two systemd services run as `looper`, with permission to set the clock. `rtc-time-restore` sets the clock early in boot. `video-looper` then waits for the display driver, gives `looper` write access to the kernel's HDMI blank file, which is its only step running as root, then syncs from USB and runs the main loop.
+Three systemd services run as `looper`. Two have permission to set the clock. `rtc-time-restore` sets the clock early in boot. `video-looper` then waits for the display driver, gives `looper` write access to the kernel's HDMI blank file, which is its only step running as root, then syncs from USB and runs the main loop. `video-looper-nextcloud` checks Nextcloud in the background when it's on, without any special permissions, and the main loop notices the new files.
 
 The boot menu is a separate process started by the console login. When it needs the screen, it takes a file lock. The service then stops its video and keeps the HDMI signal and projector on until the lock is released, which the kernel does even if the menu crashes. The menu has no permission to set the clock, so it passes the entered time to the service.
 
@@ -260,12 +331,14 @@ The boot menu is a separate process started by the console login. When it needs 
 | `time_entry.py` | The hold and time handoff between menu and service |
 | `time_sync.py` | Reads and writes the RTC and system clock, and switches NTP |
 | `network_setup.py` | Scans for and connects to Wi-Fi through `nmcli` |
-| `usb_sync.py` | USB detection, sync planning and safe copying |
+| `usb_sync.py` | USB detection and safe copying |
+| `nextcloud_sync.py` | Settings, WebDAV access, safe downloads and the background checks |
+| `sync_plan.py` | Works out what to copy, rename and delete, for both sync sources |
 | `hdmi_controller.py` | Switches the HDMI signal on and off |
 | `projector_controller.py` | Finds the USB serial adapter, and sends projector commands |
 | `console.py` | Writes to the HDMI console |
 | `constants.py` | Shared settings, like paths, the check interval and the known projector brands |
-| `video-looper.service`, `rtc-time-restore.service` | The two systemd services |
+| `video-looper.service`, `rtc-time-restore.service`, `video-looper-nextcloud.service` | The systemd services |
 | `99-looper-rtc.rules` | Gives `looper` access to the RTC device |
 | `50-looper-network-time.rules` | Lets `looper` change Wi-Fi and switch NTP |
 | `install.sh`, `deploy.sh` | Set up a Pi, and update its code |
@@ -293,6 +366,8 @@ Other options are `--restart` to force a restart, and `--allow-usb-delete` to ov
 - `install.sh` gives `hwclock` that capability too, and the RTC rule gives `looper` the device, so the `looper` user can change the clock outside the services.
 - The HDMI console logs in as `looper` automatically, so anyone with a keyboard on the Pi gets that user's shell. That includes `looper`'s permission to change Wi-Fi and NTP, through `50-looper-network-time.rules`.
 - `admin`, when `install.sh` creates it, has passwordless `sudo`, so protect its SSH access.
+- Anyone who can edit the Nextcloud folder controls what plays, and through projector settings files, which commands the projector receives.
+- The Nextcloud password or share link is stored in `/home/looper/nextcloud.conf`, which only `looper` can read, but that includes anyone with a keyboard on the Pi. It isn't logged. Connections must use HTTPS, and server certificates are checked.
 - Every USB serial adapter receives the projector commands unless a folder's settings say otherwise, so don't connect other serial devices without checking.
 
 ## License

@@ -110,8 +110,8 @@ class Screens(MenuTestCase):
     def test_menu(self):
         self.menu._show_menu_screen(5)
         self.assertEqual(self.screen(), '<clear>\n' + '=' * 60 + '\nVideo Looper - Boot Menu\n' + '=' * 60 +
-                         '\n\nSelect an option:\n\n  1. Start Demo Mode\n  2. Set RTC Time\n  3. Set Wi-Fi\n  4. Time source\n\n'
-                         '  Press 1, 2, 3, 4, or Enter to continue...\n\n  Auto-continuing in 5 second(s)...\n\n')
+                         '\n\nSelect an option:\n\n  1. Start Demo Mode\n  2. Set RTC Time\n  3. Set Wi-Fi\n  4. Time source\n  5. Nextcloud\n\n'
+                         '  Press 1 to 5, or Enter to continue...\n\n  Auto-continuing in 5 second(s)...\n\n')
 
     def test_countdown_end_and_no_countdown(self):
         self.menu._show_menu_screen(0)
@@ -167,7 +167,7 @@ class MenuKeys(MenuTestCase):
             return self.menu.display_boot_menu(), set_time
 
     def test_three_and_four_use_the_hold(self):
-        for key, method in (('3', '_set_wifi'), ('4', '_set_time_source')):
+        for key, method in (('3', '_set_wifi'), ('4', '_set_time_source'), ('5', '_set_nextcloud')):
             hold = mock.Mock()
             seen = []
             with mock.patch('time_entry.acquire_hold', return_value=hold), \
@@ -441,6 +441,124 @@ class WifiSetup(MenuTestCase):
             self.run_wifi('1', 'goodpassword')
         self.assertNotIn('goodpassword', ''.join(logs.output))
         self.assertNotIn('goodpassword', self.screen())
+
+
+class NextcloudSetup(MenuTestCase):
+    def setUp(self):
+        super().setUp()
+        self.conf = self.tmp / 'nextcloud.conf'
+        import nextcloud_sync
+        self.nextcloud = nextcloud_sync
+        for patcher in (mock.patch('time.sleep'),
+                        mock.patch.object(nextcloud_sync, 'NEXTCLOUD_CONFIG_FILE', str(self.conf)),
+                        mock.patch.object(nextcloud_sync, 'NEXTCLOUD_STATUS_FILE', str(self.tmp / 'status')),
+                        mock.patch.object(nextcloud_sync, 'NEXTCLOUD_TRIGGER_FILE', str(self.tmp / 'trigger'))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.plan = {'update': [], 'copy': ['new'], 'rename': [], 'delete': ['old-folder']}
+        patcher = mock.patch.object(nextcloud_sync, 'preview', return_value=({'new': {}}, self.plan))
+        self.preview = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_menu(self, keys, texts=()):
+        with mock.patch.object(self.menu, '_get_key', side_effect=list(keys)) as key, \
+                mock.patch.object(self.menu, '_get_text_input', side_effect=list(texts)) as text:
+            self.menu._set_nextcloud()
+        return key, text
+
+    def saved(self):
+        return self.nextcloud.load_config()
+
+    def set_up(self, enabled=True):
+        self.nextcloud.save_config(self.nextcloud.make_config(
+            {'share_url': 'https://cloud.test/s/abc', 'enabled': enabled}))
+
+    def test_share_link_setup(self):
+        self.run_menu(['1', '1'], ['https://cloud.test/s/abc', 'sharepass', ''])
+        config = self.saved()
+        self.assertEqual((config['mode'], config['password'], config['interval'], config['enabled']),
+                         ('share', 'sharepass', 15, True))
+        self.assertTrue((self.tmp / 'trigger').exists())
+
+    def test_account_setup(self):
+        self.run_menu(['2', '1'], ['https://cloud.test', 'player', 'Videos/Looper', 'apppass', '30'])
+        config = self.saved()
+        self.assertEqual((config['mode'], config['username'], config['folder'], config['interval']),
+                         ('account', 'player', 'Videos/Looper', 30))
+
+    def test_password_entries_are_secret(self):
+        _, text = self.run_menu(['1', '1'], ['https://cloud.test/s/abc', 'sharepass', ''])
+        self.assertTrue(text.call_args_list[1].kwargs.get('secret'))
+        _, text = self.run_menu(['2', '1'], ['https://cloud.test', 'player', '', 'apppass', ''])
+        self.assertTrue(text.call_args_list[3].kwargs.get('secret'))
+
+    def test_shows_removals_before_confirming(self):
+        seen = []
+        def get_key(valid):
+            seen.append(self.screen())
+            return next(keys)
+        keys = iter(['1', None])
+        with mock.patch.object(self.menu, '_get_key', get_key), \
+                mock.patch.object(self.menu, '_get_text_input', side_effect=['https://cloud.test/s/abc', '', '']):
+            self.menu._set_nextcloud()
+        self.assertIn('REMOVE 1 local folder(s)', seen[-1])
+        self.assertIn('old-folder', seen[-1])
+        self.assertIn('USB video sync will be off', seen[-1])
+
+    def test_not_saved_without_confirming(self):
+        self.run_menu(['1', None], ['https://cloud.test/s/abc', '', ''])
+        self.assertIsNone(self.saved())
+        self.assertIn('Nothing was changed', self.screen())
+
+    def test_failed_connection_saves_nothing(self):
+        self.preview.side_effect = self.nextcloud.NextcloudError('The server refused the login')
+        self.run_menu(['1'], ['https://cloud.test/s/abc', '', ''])
+        self.assertIsNone(self.saved())
+        self.assertIn('The server refused the login', self.screen())
+
+    def test_bad_settings_are_explained(self):
+        self.run_menu(['1'], ['http://cloud.test/s/abc', '', ''])
+        self.assertIsNone(self.saved())
+        self.assertIn('https://', self.screen())
+        self.preview.assert_not_called()
+
+    def test_cancelling_at_each_step(self):
+        for texts in ([None], ['https://cloud.test/s/abc', None], ['https://cloud.test/s/abc', '', None]):
+            self.run_menu(['1'], texts)
+            self.assertIsNone(self.saved())
+
+    def test_turning_off(self):
+        self.set_up()
+        self.run_menu(['3'])
+        self.assertFalse(self.saved()['enabled'])
+
+    def test_turning_on_tests_and_confirms(self):
+        self.set_up(enabled=False)
+        self.run_menu(['3', '1'])
+        self.preview.assert_called_once()
+        self.assertTrue(self.saved()['enabled'])
+
+    def test_sync_now(self):
+        self.set_up()
+        self.run_menu(['4'])
+        self.assertTrue((self.tmp / 'trigger').exists())
+
+    def test_keys_offered_match_the_state(self):
+        key, _ = self.run_menu([None])
+        self.assertEqual(key.call_args.args[0], '12')
+        self.set_up(enabled=False)
+        key, _ = self.run_menu([None])
+        self.assertEqual(key.call_args.args[0], '123')
+        self.set_up()
+        key, _ = self.run_menu([None])
+        self.assertEqual(key.call_args.args[0], '1234')
+
+    def test_crash_never_shows_or_logs_the_password(self):
+        self.preview.side_effect = RuntimeError('sharepass leaked')
+        with self.assertLogs('boot_menu', 'ERROR') as logs:
+            self.run_menu(['1'], ['https://cloud.test/s/abc', 'sharepass', ''])
+        self.assertNotIn('sharepass', ''.join(logs.output))
+        self.assertNotIn('sharepass', self.screen())
 
 
 class TimeSource(MenuTestCase):

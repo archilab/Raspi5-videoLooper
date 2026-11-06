@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import nextcloud_sync
 import usb_sync
 from tests.helpers import folder_name, make_tree, read_tree
 
@@ -19,7 +20,8 @@ class UsbSyncTestCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.base = Path(tmp.name)
         for patcher in (mock.patch('time.sleep'), mock.patch('os.chown'),
-                        mock.patch('console.CONSOLE_PATH', str(self.base / 'tty'))):
+                        mock.patch('console.CONSOLE_PATH', str(self.base / 'tty')),
+                        mock.patch('nextcloud_sync.NEXTCLOUD_CONFIG_FILE', str(self.base / 'nextcloud.conf'))):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -155,6 +157,40 @@ class OnBoot(UsbSyncTestCase):
         with mock.patch.object(sync, 'find_usb_drives', return_value=[]):
             self.assertFalse(sync.sync_on_boot())
         self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_nextcloud_turns_usb_video_sync_off(self):
+        sync = self.setup_drives({FA: VIDEO}, {FB: VIDEO})
+        nextcloud_sync.save_config(nextcloud_sync.make_config({'share_url': 'https://cloud.test/s/abc'}))
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertFalse(sync.sync_on_boot())
+        self.assertEqual(sorted(read_tree(self.local)), [FB])
+        self.assertIn('Nextcloud sync is on', (self.base / 'tty').read_text())
+
+    def test_turned_off_nextcloud_leaves_usb_sync_on(self):
+        sync = self.setup_drives({FA: VIDEO}, {})
+        nextcloud_sync.save_config(nextcloud_sync.make_config({'share_url': 'https://cloud.test/s/abc', 'enabled': False}))
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertTrue(sync.sync_on_boot())
+        self.assertEqual(sorted(read_tree(self.local)), [FA])
+
+    def test_nextcloud_txt_is_imported_and_takes_over(self):
+        sync = self.setup_drives({FA: VIDEO}, {FB: VIDEO})
+        (self.usb / 'nextcloud.txt').write_text('share_url=https://cloud.test/s/abc\n')
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertFalse(sync.sync_on_boot())
+        self.assertTrue(nextcloud_sync.is_enabled())
+        self.assertEqual(sorted(read_tree(self.local)), [FB])
+
+    def test_bad_nextcloud_txt_is_explained_and_usb_sync_continues(self):
+        sync = self.setup_drives({FA: VIDEO}, {})
+        (self.usb / 'nextcloud.txt').write_text('share_url=not a link\n')
+        shown = []
+        real = sync.display_message_on_screen
+        sync.display_message_on_screen = lambda m: (shown.append(m), real(m))
+        with mock.patch.object(sync, 'find_usb_drives', return_value=[self.usb]):
+            self.assertTrue(sync.sync_on_boot())
+        self.assertIn('Problem in nextcloud.txt', shown[0])
+        self.assertFalse(nextcloud_sync.is_enabled())
 
     def test_time_file_on_the_drive_is_just_ignored(self):
         sync = self.setup_drives({FA: VIDEO}, {})

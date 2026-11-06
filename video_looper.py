@@ -10,6 +10,7 @@ import time
 import logging
 from pathlib import Path
 import signal
+import nextcloud_sync
 import scheduler
 import time_entry
 from boot_menu import BootMenu
@@ -79,6 +80,7 @@ class VideoLooper:
         self.time_sync.sync_time()
         
         current_folder = None
+        current_signature = None
         time_entry_held = False
         last_rtc_update = None
         while self.running:
@@ -105,11 +107,14 @@ class VideoLooper:
                 
                 if active_folder_info:
                     folder_path, video_files = active_folder_info
-                    if current_folder != folder_path or not self.player.is_playing():
-                        # Folder changed, or VLC isn't running: (re)start the video
+                    signature = scheduler.video_signature(video_files)
+                    if (current_folder != folder_path or not self.player.is_playing()
+                            or signature != current_signature):
+                        # Folder changed, VLC isn't running, or the videos were updated: (re)start
                         self.player.stop_video(standby_hdmi=False)
                         started = self.player.start_video(video_files, folder_path)
                         current_folder = folder_path if started else None
+                        current_signature = signature if started else None
                     elif self.hdmi.is_available():
                         # Video is playing correctly. This only does anything if
                         # the last attempt to switch the signal on failed.
@@ -192,11 +197,24 @@ def main():
                        help='Test USB sync (show what would be synced without copying)')
     parser.add_argument('--usb-path', default=None,
                        help='Path to USB drive to sync from (optional, auto-detects if not specified)')
+    parser.add_argument('--nextcloud-status', action='store_true',
+                       help='Show the Nextcloud settings and the last check')
+    parser.add_argument('--nextcloud-test', action='store_true',
+                       help='Connect to Nextcloud and show what a sync would do, without changing anything')
+    parser.add_argument('--nextcloud-sync', action='store_true',
+                       help='Sync from Nextcloud now')
+    parser.add_argument('--nextcloud-service', action='store_true',
+                       help='Run the regular Nextcloud checks, as the background service does')
     parser.add_argument('--display-folder-info', action='store_true',
                        help='Show the folder list and boot menu on the HDMI console')
     
     args = parser.parse_args()
     
+    # These must not set up the player, whose shutdown would touch the display and projector
+    for action in ('status', 'test', 'sync', 'service'):
+        if getattr(args, f'nextcloud_{action}'):
+            sys.exit(nextcloud_sync.command_line(action, args.videos_path))
+
     looper = VideoLooper(args.videos_path)
     
     if args.test:
@@ -271,6 +289,9 @@ def main():
     
     elif args.usb_sync_test:
         # Test USB sync (scanning only, no copying)
+        if nextcloud_sync.is_enabled():
+            print("Nextcloud sync is on, so USB video sync is off and would change nothing.")
+            return
         print("Testing USB sync (scanning only, no copying)...")
         print(f"\nScanning USB drives...")
         usb_mounts = looper.usb_sync.find_usb_drives()
@@ -305,6 +326,9 @@ def main():
 
     elif args.usb_sync:
         # Manual USB sync
+        if nextcloud_sync.is_enabled():
+            print("✗ Nextcloud sync is on, so USB video sync is off. Turn it off in the boot menu first.")
+            sys.exit(1)
         print("Syncing from USB drive...")
         try:
             if args.usb_path:

@@ -10,8 +10,10 @@ import logging
 import shutil
 import time
 from pathlib import Path
+import nextcloud_sync
 import scheduler
 from console import show_on_console
+from sync_plan import make_plan
 from constants import (
     VIDEO_EXTENSIONS, PROJECTOR_CONFIG_FILES, USB_MOUNT_POINTS, DEFAULT_VIDEOS_PATH
 )
@@ -242,46 +244,6 @@ class USBSync:
         
         return video_files
     
-    def folders_have_same_video_files(self, folder1_path, folder2_path):
-        """
-        Check if two folders have the same video files (by filename)
-        Args:
-            folder1_path: Path to first folder
-            folder2_path: Path to second folder
-        Returns:
-            bool: True if folders have the same video files, False otherwise
-        """
-        video_files1 = self.get_video_files_set(folder1_path)
-        video_files2 = self.get_video_files_set(folder2_path)
-        
-        # Both folders must have at least one video file
-        if not video_files1 or not video_files2:
-            return False
-        
-        # Check if video file sets are identical
-        return video_files1 == video_files2
-    
-    def find_folder_with_same_videos(self, usb_folder_path, local_folders):
-        """
-        Find a local folder that has the same video files as the USB folder
-        Args:
-            usb_folder_path: Path to USB folder
-            local_folders: Dictionary of local folders (name -> Path)
-        Returns:
-            tuple: (folder_name, folder_path) if found, (None, None) otherwise
-        """
-        usb_video_files = self.get_video_files_set(usb_folder_path)
-        
-        if not usb_video_files:
-            return (None, None)
-        
-        # Check each local folder
-        for folder_name, local_folder_path in local_folders.items():
-            if self.folders_have_same_video_files(usb_folder_path, local_folder_path):
-                return (folder_name, local_folder_path)
-        
-        return (None, None)
-    
     def _copy_file_safely(self, source, destination):
         """
         Copy a file so that destination is only ever the old file or the complete new one.
@@ -360,31 +322,11 @@ class USBSync:
         Work out what syncing from a USB drive would do, without changing anything.
         Both the real sync and its preview use this, so they can't disagree.
         Returns:
-            dict: 'update' and 'copy' lists of folder names, 'rename' list of
-            (old name, new name), and 'delete' list of local folder names
+            dict: see sync_plan.make_plan
         """
-        usb_folders = self.get_valid_folders(usb_root_path)
-        local_folders = self.get_valid_folders(self.local_videos_path)
-
-        # Local folders that are going away. Only these may be renamed, since a folder
-        # that's still on the drive must stay, even if another one has the same videos.
-        leaving = {name: path for name, path in sorted(local_folders.items())
-                   if name not in usb_folders}
-        plan = {'update': [], 'copy': [], 'rename': [], 'delete': []}
-
-        for name, usb_folder in sorted(usb_folders.items()):
-            if name in local_folders:
-                plan['update'].append(name)
-                continue
-            old_name, _ = self.find_folder_with_same_videos(usb_folder, leaving)
-            if old_name:
-                del leaving[old_name]
-                plan['rename'].append((old_name, name))
-            else:
-                plan['copy'].append(name)
-
-        plan['delete'] = sorted(leaving)
-        return plan
+        def videos(root):
+            return {name: self.get_video_files_set(path) for name, path in self.get_valid_folders(root).items()}
+        return make_plan(videos(usb_root_path), videos(self.local_videos_path))
 
     def sync_usb_to_local(self, usb_root_path):
         """
@@ -473,14 +415,25 @@ class USBSync:
 
     def sync_on_boot(self):
         """
-        Check for USB drives on boot and sync if found
+        Check for USB drives on boot, importing any Nextcloud settings, and sync
+        unless Nextcloud is on, since both would delete what the other added
         Returns:
             bool: True if USB was found and synced, False otherwise
         """
         time.sleep(2)
 
-        source = self.find_sync_source(self.find_usb_drives())
+        usb_mounts = self.find_usb_drives()
+        message = nextcloud_sync.import_from_usb(usb_mounts)
+        if message:
+            self.display_message_on_screen(message)
+            time.sleep(5)
+
+        source = self.find_sync_source(usb_mounts)
         if source is None:
+            return False
+        if nextcloud_sync.is_enabled():
+            self.display_message_on_screen("Nextcloud sync is on, so the USB drive's videos are ignored.")
+            time.sleep(3)
             return False
         if not self.sync_usb_to_local(source):
             self.logger.warning(f"USB sync completed with errors from {source}")

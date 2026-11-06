@@ -1,0 +1,21 @@
+[Unit]
+Description=Video Looper Nextcloud Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=looper
+Group=looper
+WorkingDirectory=/home/looper/video_looper
+ExecStart=/usr/bin/python3 /home/looper/video_looper/video_looper.py --nextcloud-service
+Restart=always
+RestartSec=30
+# Downloads must never get in the way of playback
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

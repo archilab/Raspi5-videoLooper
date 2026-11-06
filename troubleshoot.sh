@@ -152,6 +152,15 @@ check_time_sync() {
     fi
 }
 
+# Function to check Nextcloud
+check_nextcloud() {
+    echo -e "${YELLOW}Checking Nextcloud...${NC}"
+
+    echo "Background service: $(systemctl is-active video-looper-nextcloud)"
+    cd "$VIDEO_LOOPER_DIR"
+    python3 video_looper.py --nextcloud-status
+}
+
 # Function to check projector configuration
 check_projector() {
     echo -e "${YELLOW}Checking projector configuration...${NC}"
@@ -249,6 +258,8 @@ echo ""
 test_folder_parsing
 echo ""
 check_time_sync
+echo ""
+check_nextcloud
 echo ""
 check_projector
 echo ""

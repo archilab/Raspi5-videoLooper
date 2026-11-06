@@ -180,6 +180,22 @@ class Overnight(unittest.TestCase):
             self.assertEqual(found[0].name, self.NIGHT)
 
 
+class VideoSignature(unittest.TestCase):
+    def test_changes_with_content_and_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first, second = Path(tmp) / 'a.mp4', Path(tmp) / 'b.mp4'
+            first.write_text('one')
+            second.write_text('two')
+            before = scheduler.video_signature([first])
+            self.assertEqual(scheduler.video_signature([first]), before)
+            self.assertNotEqual(scheduler.video_signature([first, second]), before)
+            first.write_text('longer')
+            self.assertNotEqual(scheduler.video_signature([first]), before)
+
+    def test_missing_file_is_harmless(self):
+        self.assertEqual(scheduler.video_signature([Path('/nonexistent/a.mp4')]), [('/nonexistent/a.mp4', None, None)])
+
+
 class FindingFolders(unittest.TestCase):
     NOW = datetime(2026, 11, 5, 12, 0)
 

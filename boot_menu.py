@@ -13,6 +13,7 @@ import time
 import tty
 from datetime import datetime
 import network_setup
+import nextcloud_sync
 import scheduler
 import time_entry
 from console import show_on_console
@@ -30,6 +31,7 @@ class BootMenu:
         self.time_sync = time_sync
         self.wifi_status = None
         self.time_status = None
+        self.nextcloud_status = None
 
     def display_folder_info_on_screen(self):
         """Display folder information on HDMI screen"""
@@ -156,6 +158,7 @@ class BootMenu:
             menu_timeout = 20  # seconds to wait for input
             self.wifi_status = network_setup.current_wifi() or "not connected"
             self.time_status = "NTP" if self.time_sync.ntp_enabled() else "RTC only"
+            self.nextcloud_status = nextcloud_sync.status_line()
             start_time = time.time()
             last_countdown_update = 0
             
@@ -208,11 +211,16 @@ class BootMenu:
                             time.sleep(0.5)
                             self._with_hold(self._set_time_source)
                             return None
+                        elif char == '5':
+                            self._show_feedback("Option 5: Nextcloud...")
+                            time.sleep(0.5)
+                            self._with_hold(self._set_nextcloud)
+                            return None
                         elif char == '\n' or char == '\r':
                             return None  # Enter pressed, continue
                         else:
                             # Invalid key - show error and restart
-                            self._show_feedback(f"Invalid option: {char}. Press 1, 2, 3, 4, or Enter...")
+                            self._show_feedback(f"Invalid option: {char}. Press 1 to 5, or Enter...")
                             time.sleep(1.5)
                             start_time = time.time()  # Reset timer
                             last_countdown_update = 0
@@ -241,8 +249,9 @@ class BootMenu:
             "  2. Set RTC Time",
             "  3. Set Wi-Fi" + (f" (now: {self.wifi_status})" if self.wifi_status else ""),
             "  4. Time source" + (f" (now: {self.time_status})" if self.time_status else ""),
+            "  5. Nextcloud" + (f" (now: {self.nextcloud_status})" if self.nextcloud_status else ""),
             "",
-            "  Press 1, 2, 3, 4, or Enter to continue...",
+            "  Press 1 to 5, or Enter to continue...",
             "",
         ]
         if remaining is not None and remaining > 0:
@@ -478,6 +487,109 @@ class BootMenu:
             # Not the exception's text, in case it ever includes the password
             self.logger.error(f"Error in Wi-Fi setup: {type(e).__name__}")
             self.show_message("Wi-Fi setup failed. Wi-Fi may not have changed.", 5)
+
+    NEXTCLOUD_HEADER = "Nextcloud\n" + "=" * 60 + "\n\n"
+
+    def _set_nextcloud(self):
+        """Show Nextcloud's status, and offer to set it up, switch it or sync now"""
+        try:
+            config = nextcloud_sync.load_config()
+            status = nextcloud_sync.read_status()
+            lines = [f"Now: {nextcloud_sync.status_line()}"]
+            if status:
+                lines.append(f"Last check at {status['time']}: {status['message']}")
+            lines += ["", "  1. Set up with a share link", "  2. Set up with an account and app password"]
+            if config:
+                lines.append("  3. Turn off" if config['enabled'] else "  3. Turn on")
+                if config['enabled']:
+                    lines.append("  4. Sync now")
+            lines += ["", "  Enter to leave it."]
+            show_on_console(self.NEXTCLOUD_HEADER + "\n".join(lines) + "\n")
+
+            valid = '12' + ('' if not config else '34' if config['enabled'] else '3')
+            key = self._get_key(valid)
+            if key == '1':
+                self._set_up_nextcloud_share()
+            elif key == '2':
+                self._set_up_nextcloud_account()
+            elif key == '3' and config['enabled']:
+                config['enabled'] = False
+                nextcloud_sync.save_config(config)
+                self.show_message("Nextcloud is off.\nUSB video sync works again the next time the service starts.", 5)
+            elif key == '3':
+                self._turn_on_nextcloud(config)
+            elif key == '4':
+                nextcloud_sync.request_sync()
+                self.show_message("Nextcloud will check now, and the video returns meanwhile.", 3)
+        except Exception as e:
+            # Not the exception's text, in case it ever includes a password or share link
+            self.logger.error(f"Error in Nextcloud setup: {type(e).__name__}")
+            self.show_message("Nextcloud setup failed. Nothing was changed.", 5)
+
+    def _set_up_nextcloud_share(self):
+        share_url = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Share link, like https://cloud.example.com/s/abc123:")
+        if not share_url:
+            return
+        password = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Share password (leave empty if none):", secret=True)
+        if password is not None:
+            self._finish_nextcloud_setup({'share_url': share_url, 'password': password})
+
+    def _set_up_nextcloud_account(self):
+        server = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Server, like https://cloud.example.com:")
+        if not server:
+            return
+        username = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Username:")
+        if not username:
+            return
+        folder = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Folder holding the video folders, like Videos/Looper\n"
+                                      "(leave empty for the top level):")
+        if folder is None:
+            return
+        password = self._get_text_input(f"{self.NEXTCLOUD_HEADER}App password, created in Nextcloud's security settings:",
+                                        secret=True)
+        if password:
+            self._finish_nextcloud_setup({'server': server, 'username': username, 'folder': folder, 'password': password})
+
+    def _finish_nextcloud_setup(self, fields):
+        interval = self._get_text_input(f"{self.NEXTCLOUD_HEADER}Check every how many minutes? "
+                                        f"(leave empty for {nextcloud_sync.NEXTCLOUD_DEFAULT_INTERVAL}):")
+        if interval is None:
+            return
+        fields['interval'] = interval
+        try:
+            config = nextcloud_sync.make_config(fields)
+        except ValueError as e:
+            self.show_message(f"{e}\nNothing was changed.", 5)
+            return
+        self._turn_on_nextcloud(config)
+
+    def _turn_on_nextcloud(self, config):
+        """Test the connection and show what would happen, then turn on if confirmed"""
+        show_on_console(f"{self.NEXTCLOUD_HEADER}Connecting...\n")
+        try:
+            remote, plan = nextcloud_sync.preview(config, self.videos_path)
+        except nextcloud_sync.NextcloudError as e:
+            self.show_message(f"{e}\nNothing was changed.", 6)
+            return
+
+        lines = [f"Connected, and found {len(remote)} valid folder(s).", ""]
+        if remote:
+            lines.append(f"Turning this on will download {len(plan['copy'])} folder(s), rename {len(plan['rename'])}, "
+                         f"and REMOVE {len(plan['delete'])} local folder(s)")
+            lines += [f"    {name}" for name in plan['delete']]
+            lines.append("that aren't on Nextcloud.")
+        else:
+            lines.append("With no valid folders on Nextcloud, nothing changes for now.")
+        lines += ["USB video sync will be off.", "", "  1. Turn on", "", "  Enter to cancel."]
+        show_on_console(self.NEXTCLOUD_HEADER + "\n".join(lines) + "\n")
+
+        if self._get_key('1') is None:
+            self.show_message("Nothing was changed.", 2)
+            return
+        config['enabled'] = True
+        nextcloud_sync.save_config(config)
+        nextcloud_sync.request_sync()
+        self.show_message("Nextcloud is on, and will check now.", 3)
 
     def _set_time_source(self):
         """Show the time source, and offer to switch it"""

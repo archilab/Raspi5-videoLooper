@@ -21,6 +21,12 @@ NEXTCLOUD_DEFAULT_INTERVAL = 15  # minutes between checks
 NEXTCLOUD_FIRST_CHECK_DELAY = 30  # seconds after the service starts
 NEXTCLOUD_FREE_SPACE_MARGIN = 200 * 1024 * 1024  # bytes to always leave free
 
+# Audio: off unless this file says otherwise
+AUDIO_CONFIG_FILE = "/home/looper/audio.conf"
+# Port 1 and 2 are HDMI 0 and HDMI 1 on the board, and the card number can change
+HDMI_STATUS_FILES = "/sys/class/drm/card*-HDMI-A-{port}/status"
+HDMI_AUDIO_DEVICE = "hdmi:CARD=vc4hdmi{index},DEV=0"  # hdmi: converts to the format these cards need
+
 # Video formats
 VIDEO_EXTENSIONS: FrozenSet[str] = frozenset({
     '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'

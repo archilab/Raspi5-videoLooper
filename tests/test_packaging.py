@@ -79,6 +79,9 @@ class Packaging(unittest.TestCase):
 
 
 class Documentation(unittest.TestCase):
+    def test_install_lets_looper_play_sound(self):
+        self.assertIn('usermod -aG audio looper', (ROOT / 'install.sh').read_text())
+
     def test_readme_only_lists_real_options(self):
         readme = (ROOT / 'README.md').read_text()
         known = ' '.join((ROOT / name).read_text() for name in ('video_looper.py', 'deploy.sh'))

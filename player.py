@@ -1,13 +1,53 @@
 #!/usr/bin/env python3
 """Plays a folder's videos with VLC, and controls the display and projector around that"""
 
+import glob
 import logging
 import os
 import subprocess
 import time
 import time_entry
-from constants import HDMI_WAKE_DELAY, PROJECTOR_CONFIG_FILES
+from constants import (
+    AUDIO_CONFIG_FILE, HDMI_AUDIO_DEVICE, HDMI_STATUS_FILES, HDMI_WAKE_DELAY, PROJECTOR_CONFIG_FILES
+)
 from hdmi_controller import STATE_ON
+
+logger = logging.getLogger(__name__)
+
+
+def audio_enabled():
+    """Check if videos should play with sound. A missing or damaged settings file means no."""
+    try:
+        with open(AUDIO_CONFIG_FILE, encoding='utf-8') as f:
+            return f.read().strip() == 'enabled=true'
+    except (OSError, UnicodeError):
+        return False
+
+
+def set_audio_enabled(enabled):
+    """Save the audio setting. Returns True if it was saved."""
+    temp_file = f"{AUDIO_CONFIG_FILE}.tmp"
+    try:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(f"enabled={'true' if enabled else 'false'}\n")
+        os.replace(temp_file, AUDIO_CONFIG_FILE)
+        return True
+    except OSError as e:
+        logger.error(f"Could not save the audio setting: {e}")
+        return False
+
+
+def audio_device():
+    """The sound device of the first HDMI port with a display connected, otherwise HDMI 0"""
+    for index in (0, 1):
+        for status_file in glob.glob(HDMI_STATUS_FILES.format(port=index + 1)):
+            try:
+                with open(status_file, encoding='utf-8') as f:
+                    if f.read().strip() == 'connected':
+                        return HDMI_AUDIO_DEVICE.format(index=index)
+            except OSError:
+                pass
+    return HDMI_AUDIO_DEVICE.format(index=0)
 
 
 class Player:
@@ -144,7 +184,7 @@ class Player:
             '--fullscreen',  # Fullscreen mode
             *(['--run-time', str(duration)] if duration else ['--loop']),
             '--no-osd',  # No on-screen display
-            '--no-audio',  # no audio
+            *(['--aout=alsa', f'--alsa-audio-device={audio_device()}'] if audio_enabled() else ['--no-audio']),
             '--quiet',  # Reduce output
             *[str(f) for f in video_files],
         ]

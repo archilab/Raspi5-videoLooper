@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import boot_menu
+import player
 import console
 from tests.helpers import folder_name, make_tree
 
@@ -110,8 +111,8 @@ class Screens(MenuTestCase):
     def test_menu(self):
         self.menu._show_menu_screen(5)
         self.assertEqual(self.screen(), '<clear>\n' + '=' * 60 + '\nVideo Looper - Boot Menu\n' + '=' * 60 +
-                         '\n\nSelect an option:\n\n  1. Start Demo Mode\n  2. Set RTC Time\n  3. Set Wi-Fi\n  4. Time source\n  5. Nextcloud\n\n'
-                         '  Press 1 to 5, or Enter to continue...\n\n  Auto-continuing in 5 second(s)...\n\n')
+                         '\n\nSelect an option:\n\n  1. Start Demo Mode\n  2. Set RTC Time\n  3. Set Wi-Fi\n  4. Time source\n  5. Nextcloud\n  6. Audio\n\n'
+                         '  Press 1 to 6, or Enter to continue...\n\n  Auto-continuing in 5 second(s)...\n\n')
 
     def test_countdown_end_and_no_countdown(self):
         self.menu._show_menu_screen(0)
@@ -175,7 +176,7 @@ class MenuKeys(MenuTestCase):
             return self.menu.display_boot_menu(), set_time
 
     def test_three_and_four_use_the_hold(self):
-        for key, method in (('3', '_set_wifi'), ('4', '_set_time_source'), ('5', '_set_nextcloud')):
+        for key, method in (('3', '_set_wifi'), ('4', '_set_time_source'), ('5', '_set_nextcloud'), ('6', '_set_audio')):
             hold = mock.Mock()
             seen = []
             with mock.patch('time_entry.acquire_hold', return_value=hold), \
@@ -675,3 +676,61 @@ class DemoMode(MenuTestCase):
         self.menu.run_demo_mode()
         self.player.start_video.assert_not_called()
         self.assertIn('No valid video folders', self.screen())
+
+
+class AudioOption(MenuTestCase):
+    def setUp(self):
+        super().setUp()
+        for patcher in (mock.patch.object(player, 'AUDIO_CONFIG_FILE', str(self.tmp / 'audio.conf')),
+                        mock.patch('time.sleep')):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def choose(self, key):
+        with mock.patch.object(self.menu, '_get_key', return_value=key):
+            self.menu._set_audio()
+
+    def test_switches_on(self):
+        self.choose('1')
+        self.assertTrue(player.audio_enabled())
+        self.assertIn('Audio is on', self.screen())
+
+    def test_switches_off(self):
+        player.set_audio_enabled(True)
+        self.choose('1')
+        self.assertFalse(player.audio_enabled())
+        self.assertIn('Audio is off', self.screen())
+
+    def test_leaving_changes_nothing(self):
+        self.choose(None)
+        self.assertIn('Now: off', self.screen())
+        self.assertIn('1. Switch on', self.screen())
+        self.assertFalse(player.audio_enabled())
+        self.assertFalse((self.tmp / 'audio.conf').exists())
+
+    def test_prompt_when_on(self):
+        player.set_audio_enabled(True)
+        self.choose(None)
+        self.assertIn('Now: on', self.screen())
+        self.assertIn('1. Switch off', self.screen())
+        self.assertTrue(player.audio_enabled())
+
+    def test_failure_to_save_is_shown(self):
+        with mock.patch('boot_menu.set_audio_enabled', return_value=False):
+            self.choose('1')
+        self.assertIn('Could not save', self.screen())
+
+    def test_menu_shows_the_setting(self):
+        with mock.patch('network_setup.current_wifi', return_value='homenet'), \
+                mock.patch.object(self.menu, '_setup_terminal_input'), \
+                mock.patch.object(self.menu, '_restore_terminal_input'), \
+                mock.patch.object(self.menu, 'get_char_blocking', side_effect=['\r']):
+            self.menu.display_boot_menu()
+            self.assertIn('6. Audio (now: off)', self.screen())
+            player.set_audio_enabled(True)
+        with mock.patch('network_setup.current_wifi', return_value='homenet'), \
+                mock.patch.object(self.menu, '_setup_terminal_input'), \
+                mock.patch.object(self.menu, '_restore_terminal_input'), \
+                mock.patch.object(self.menu, 'get_char_blocking', side_effect=['\r']):
+            self.menu.display_boot_menu()
+        self.assertIn('6. Audio (now: on)', self.screen())

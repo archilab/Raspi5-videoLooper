@@ -87,6 +87,9 @@ if [ "$LOOPER_EXISTS" = false ]; then
     LOOPER_EXISTS=true
 fi
 
+# VLC needs this to play sound, when audio is switched on in the boot menu
+sudo usermod -aG audio looper
+
 # Ensure looper is NOT in sudo group
 if groups looper | grep -q '\bsudo\b'; then
     echo -e "${YELLOW}Removing 'looper' from sudo group...${NC}"

@@ -2,7 +2,7 @@
 
 Unattended video playback for a Raspberry Pi 5 driving a screen or projector, for signage or installations. It works offline, or can update itself from Nextcloud: you put videos in folders, and **each folder's name sets when it plays**.
 
-- Loops videos silently and fullscreen with VLC, starting on boot
+- Loops videos fullscreen with VLC, starting on boot, silently or with sound through HDMI
 - Schedules by date and daily hours, with several time windows a day and overnight windows
 - Or plays videos from the top level of a USB drive in an endless loop, with no schedule to set up
 - Updates content from a USB drive when the service starts, or regularly from a Nextcloud folder
@@ -188,11 +188,21 @@ After each boot, the HDMI console shows the folder list for 10 seconds, then thi
 | `3` | Set Wi-Fi |
 | `4` | Choose the time source |
 | `5` | Set up Nextcloud, or see its status |
+| `6` | Switch video audio on or off |
 | `Enter` | Continue, which also happens when the countdown ends |
 
 The service's video can start while the menu is on screen and cover it. Pressing a number still works: the video stops within a couple of seconds, and returns by itself when you're done.
 
 The HDMI signal stays on for this menu even when nothing is scheduled. A projector doesn't switch on for it, though, so if a projector is your only screen, switch it on with its own remote first.
+
+## Audio
+
+Videos play silently by default. Press `6` at the boot menu, then `1`, to switch sound on or off. The video restarts with the new setting when you leave the menu, and the choice survives reboots. It applies to every folder and to demo mode.
+
+- **Output:** sound goes through HDMI to the display or projector, so that device needs speakers. It uses the first HDMI port with a display connected. The Pi 5 has no headphone jack, and USB sound cards and Bluetooth aren't supported.
+- **Volume:** set it on the display or projector. The Pi always sends full volume.
+- **Videos with no sound track** just play silently.
+- **Without a keyboard:** the setting is stored in `/home/looper/audio.conf`, as `enabled=true` or `enabled=false`, and is read each time a video starts. Anything else there counts as off.
 
 ## Wi-Fi
 

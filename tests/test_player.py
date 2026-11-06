@@ -31,6 +31,10 @@ class PlayerTestCase(unittest.TestCase):
                         mock.patch.object(player.Player, 'clear_display')):
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.audio_file = self.folder / 'audio.conf'
+        patcher = mock.patch.object(player, 'AUDIO_CONFIG_FILE', str(self.audio_file))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.projector = FakeProjector()
         self.player = player.Player(make_hdmi(self.display), self.projector)
 
@@ -275,3 +279,67 @@ class Stopping(PlayerTestCase):
         self.player.start_video(['a.mp4'], self.folder)
         self.player.current_process.alive = False
         self.assertFalse(self.player.is_playing())
+
+
+class Audio(PlayerTestCase):
+    def hdmi_status(self, **ports):
+        """Fake status files, like port1='connected'"""
+        for name, status in ports.items():
+            directory = self.folder / f'card1-HDMI-A-{name[-1]}'
+            directory.mkdir()
+            (directory / 'status').write_text(status + '\n')
+        patcher = mock.patch.object(player, 'HDMI_STATUS_FILES',
+                                    str(self.folder / 'card*-HDMI-A-{port}' / 'status'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_off_by_default(self):
+        self.assertFalse(player.audio_enabled())
+
+    def test_setting_is_saved_and_can_be_switched_back(self):
+        self.assertTrue(player.set_audio_enabled(True))
+        self.assertTrue(player.audio_enabled())
+        self.assertTrue(player.set_audio_enabled(False))
+        self.assertFalse(player.audio_enabled())
+        self.assertEqual([p.name for p in self.folder.iterdir()], ['audio.conf'])
+
+    def test_damaged_settings_mean_off(self):
+        for content in (b'', b'enabled=yes', b'enabled=true\nmore', b'\xff\xfe'):
+            self.audio_file.write_bytes(content)
+            self.assertFalse(player.audio_enabled(), content)
+
+    def test_unwritable_setting_is_reported(self):
+        with mock.patch.object(player, 'AUDIO_CONFIG_FILE', str(self.folder / 'missing' / 'audio.conf')), \
+                self.assertLogs('player', 'ERROR'):
+            self.assertFalse(player.set_audio_enabled(True))
+
+    def test_vlc_gets_the_sound_device_when_on(self):
+        self.hdmi_status(port1='connected', port2='disconnected')
+        player.set_audio_enabled(True)
+        self.player.start_video(['a.mp4'], self.folder)
+        self.assertNotIn('--no-audio', self.commands[0])
+        self.assertIn('--aout=alsa', self.commands[0])
+        self.assertIn('--alsa-audio-device=hdmi:CARD=vc4hdmi0,DEV=0', self.commands[0])
+        self.assertEqual(self.commands[0][-1], 'a.mp4')
+
+    def test_demo_uses_the_setting_too(self):
+        self.hdmi_status(port1='connected')
+        player.set_audio_enabled(True)
+        self.player.start_video(['a.mp4'], self.folder, duration=60)
+        self.assertNotIn('--no-audio', self.commands[0])
+
+    def test_sound_follows_the_connected_port(self):
+        self.hdmi_status(port1='disconnected', port2='connected')
+        self.assertEqual(player.audio_device(), 'hdmi:CARD=vc4hdmi1,DEV=0')
+
+    def test_both_ports_connected_uses_hdmi_0(self):
+        self.hdmi_status(port1='connected', port2='connected')
+        self.assertEqual(player.audio_device(), 'hdmi:CARD=vc4hdmi0,DEV=0')
+
+    def test_nothing_connected_uses_hdmi_0(self):
+        self.hdmi_status(port1='disconnected', port2='disconnected')
+        self.assertEqual(player.audio_device(), 'hdmi:CARD=vc4hdmi0,DEV=0')
+
+    def test_no_status_files_uses_hdmi_0(self):
+        self.hdmi_status()
+        self.assertEqual(player.audio_device(), 'hdmi:CARD=vc4hdmi0,DEV=0')

@@ -17,6 +17,7 @@ import nextcloud_sync
 import scheduler
 import time_entry
 from console import show_on_console
+from player import audio_enabled, set_audio_enabled
 
 
 # Keep waiting this long since the last key press on the text and list screens
@@ -32,6 +33,7 @@ class BootMenu:
         self.wifi_status = None
         self.time_status = None
         self.nextcloud_status = None
+        self.audio_status = None
 
     def display_folder_info_on_screen(self):
         """Display folder information on HDMI screen"""
@@ -161,6 +163,7 @@ class BootMenu:
             self.wifi_status = network_setup.current_wifi() or "not connected"
             self.time_status = "NTP" if self.time_sync.ntp_enabled() else "RTC only"
             self.nextcloud_status = nextcloud_sync.status_line()
+            self.audio_status = "on" if audio_enabled() else "off"
             start_time = time.time()
             last_countdown_update = 0
             
@@ -218,11 +221,16 @@ class BootMenu:
                             time.sleep(0.5)
                             self._with_hold(self._set_nextcloud)
                             return None
+                        elif char == '6':
+                            self._show_feedback("Option 6: Audio...")
+                            time.sleep(0.5)
+                            self._with_hold(self._set_audio)
+                            return None
                         elif char == '\n' or char == '\r':
                             return None  # Enter pressed, continue
                         else:
                             # Invalid key - show error and restart
-                            self._show_feedback(f"Invalid option: {char}. Press 1 to 5, or Enter...")
+                            self._show_feedback(f"Invalid option: {char}. Press 1 to 6, or Enter...")
                             time.sleep(1.5)
                             start_time = time.time()  # Reset timer
                             last_countdown_update = 0
@@ -252,8 +260,9 @@ class BootMenu:
             "  3. Set Wi-Fi" + (f" (now: {self.wifi_status})" if self.wifi_status else ""),
             "  4. Time source" + (f" (now: {self.time_status})" if self.time_status else ""),
             "  5. Nextcloud" + (f" (now: {self.nextcloud_status})" if self.nextcloud_status else ""),
+            "  6. Audio" + (f" (now: {self.audio_status})" if self.audio_status else ""),
             "",
-            "  Press 1 to 5, or Enter to continue...",
+            "  Press 1 to 6, or Enter to continue...",
             "",
         ]
         if remaining is not None and remaining > 0:
@@ -613,6 +622,25 @@ class BootMenu:
             self.logger.error(f"Error setting the time source: {e}")
             self.show_message(f"Error: {str(e)}", 3)
     
+    def _set_audio(self):
+        """Show whether videos play with sound, and offer to switch it"""
+        try:
+            enabled = audio_enabled()
+            now, other = ("on", "off") if enabled else ("off", "on")
+            show_on_console(f"Audio\n{'=' * 60}\n\nNow: {now}\n\n  1. Switch {other}\n\n  Enter to leave it.\n")
+            if self._get_key('1') is None:
+                return
+
+            if not set_audio_enabled(not enabled):
+                self.show_message("Could not save the audio setting.", 5)
+            elif enabled:
+                self.show_message("Audio is off. Videos play silently.", 5)
+            else:
+                self.show_message("Audio is on, through HDMI.\nSet the volume on the display or projector.", 5)
+        except Exception as e:
+            self.logger.error(f"Error setting audio: {e}")
+            self.show_message(f"Error: {str(e)}", 3)
+
     def _enter_and_set_time(self):
         """Handle manual RTC time setting - step-by-step entry"""
         try:

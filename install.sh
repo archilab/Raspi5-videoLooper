@@ -467,6 +467,7 @@ echo "   Join several daily time windows with _and_: ..._0500_to_0900_and_1600_t
 echo "3. Start the service with: sudo systemctl start video-looper"
 echo "4. Check status with: sudo systemctl status video-looper"
 echo "5. View logs with: sudo journalctl -u video-looper -f"
+echo "6. Reboot to use the boot menu, for the time, Wi-Fi and Nextcloud settings"
 echo ""
 echo -e "${YELLOW}Service management commands:${NC}"
 echo "  Start:   sudo systemctl start video-looper"

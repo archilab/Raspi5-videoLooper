@@ -158,7 +158,9 @@ check_nextcloud() {
 
     echo "Background service: $(systemctl is-active video-looper-nextcloud)"
     cd "$VIDEO_LOOPER_DIR"
-    python3 video_looper.py --nextcloud-status
+    # Only looper can read the settings
+    sudo -n -u looper env PYTHONDONTWRITEBYTECODE=1 python3 video_looper.py --nextcloud-status 2>/dev/null \
+        || python3 video_looper.py --nextcloud-status
 }
 
 # Function to check projector configuration
@@ -274,5 +276,6 @@ echo "2. If VLC fails: sudo apt install --reinstall vlc"
 echo "3. If permissions wrong: sudo chown -R looper:looper $VIDEOS_DIR"
 echo "4. If no videos found: Check folder naming convention"
 echo "5. If the time is wrong after power loss: check the RTC battery, and set the time from the boot menu"
+echo "6. If Nextcloud isn't updating: sudo -u looper python3 $VIDEO_LOOPER_DIR/video_looper.py --nextcloud-test"
 echo ""
 echo "For more help, check the README.md file"
